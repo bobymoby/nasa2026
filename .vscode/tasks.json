@@ -1,0 +1,59 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "dev: all",
+      "dependsOn": ["dev: frontend", "dev: backend", "dev: claude", "dev: zsh"],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
+    },
+    {
+      "label": "dev: frontend",
+      "type": "shell",
+      "command": "BROWSER=none npm start; exec zsh",
+      "options": {
+        "cwd": "${workspaceFolder}/frontend",
+        "shell": { "executable": "zsh", "args": ["-ic"] }
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "reveal": "always", "focus": false }
+    },
+    {
+      "label": "dev: backend",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/fastapi dev app/main.py; exec zsh",
+      "options": {
+        "cwd": "${workspaceFolder}/backend",
+        "shell": { "executable": "zsh", "args": ["-ic"] }
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "reveal": "always", "focus": false }
+    },
+    {
+      "label": "dev: claude",
+      "type": "shell",
+      "command": "claude; exec zsh",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": { "executable": "zsh", "args": ["-ic"] }
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "reveal": "always", "focus": true }
+    },
+    {
+      "label": "dev: zsh",
+      "type": "shell",
+      "command": "exec zsh",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": { "executable": "zsh", "args": ["-ic"] }
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "reveal": "always", "focus": false }
+    }
+  ]
+}

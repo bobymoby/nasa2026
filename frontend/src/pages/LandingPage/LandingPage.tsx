@@ -1,5 +1,4 @@
 import { useNavigate } from "react-router"
-import "./LandingPage.css"
 import Map from "../../components/Map/Map"
 import { Bounds } from "../../data/point"
 import { Field } from "../../api/fetchField"

@@ -1,4 +1,4 @@
-import "./SentinelPanel.css"
+import "./SentinelPanel.scss"
 import { useEffect, useMemo, useState } from "react"
 
 import { Field } from "../../api/fetchField"

@@ -1,0 +1,366 @@
+@use "../../styles/tokens" as *;
+@use "../../styles/mixins" as *;
+
+// overlays (panel, buttons) are positioned relative to this
+.map-root {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+}
+
+#map-container {
+    height: 100%;
+    width: 100%;
+    background-color: $surface-solid;
+}
+
+// ---- left panel -------------------------------------------------------------
+
+.sidebar {
+    @include glass-panel;
+    @include thin-scrollbar;
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1;
+    margin: $gap;
+    padding: 14px 16px;
+    width: 300px;
+    // the sidebar grows with the field list and soil legend
+    max-height: calc(100% - #{$gap * 2});
+    overflow-y: auto;
+    font-size: 13px;
+    animation: panel-in 220ms $ease;
+}
+
+// the collapsed "Show panel" pill
+button.sidebar.panel-toggle {
+    @include button(solid);
+    width: auto;
+    padding: 9px 16px;
+    font-size: 13px;
+}
+
+.sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+
+    // nested headers act as section labels
+    .fields-panel &,
+    .soil-panel & {
+        @include eyebrow;
+    }
+}
+
+.panel-toggle {
+    @include button(ghost, sm);
+
+    &.active {
+        @include active-state;
+    }
+}
+
+.coord-error {
+    grid-column: 1 / -1;
+    margin-top: 6px;
+    color: $danger;
+    font-size: 12px;
+}
+
+.fields-hint {
+    margin-top: 6px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: $text-muted;
+}
+
+// ---- location search --------------------------------------------------------
+
+.location-search {
+    position: relative;
+    margin-top: 12px;
+
+    input {
+        @include dark-input;
+        width: 100%;
+        padding-left: 34px;
+        // magnifier icon
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23cbd5e1' stroke-width='2' stroke-linecap='round' viewBox='0 0 24 24'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: 11px center;
+    }
+}
+
+.location-search-results {
+    @include thin-scrollbar;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 2;
+    margin: 6px 0 0;
+    padding: 4px;
+    list-style: none;
+    background-color: $surface-solid;
+    border: 1px solid $border-strong;
+    border-radius: $radius;
+    box-shadow: $shadow;
+    max-height: 260px;
+    overflow-y: auto;
+    animation: panel-in 140ms $ease;
+
+    li {
+        padding: 7px 10px;
+        border-radius: $radius-sm;
+        font-size: 12px;
+        color: $text;
+        cursor: pointer;
+
+        &.highlighted {
+            background-color: $info-soft;
+        }
+    }
+}
+
+// ---- fields -----------------------------------------------------------------
+
+.fields-panel {
+    @include section-divider;
+}
+
+.fields-actions {
+    display: flex;
+    gap: 6px;
+    // undo the eyebrow styling inherited from the header
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.organic-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 12px;
+    color: $text;
+    cursor: pointer;
+
+    input {
+        margin: 0;
+        accent-color: $accent;
+    }
+}
+
+.organic-swatch {
+    width: 12px;
+    height: 12px;
+    border: 2px solid #16a34a;
+    border-radius: 3px;
+}
+
+.fields-list {
+    @include thin-scrollbar;
+    list-style: none;
+    margin: 10px 0 0;
+    padding: 0;
+    max-height: 240px;
+    overflow-y: auto;
+
+    li {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px;
+        border-radius: $radius-sm;
+        font-size: 12px;
+        transition: background-color $transition;
+
+        &:hover {
+            background-color: $surface-hover;
+        }
+    }
+}
+
+.field-name {
+    @include button-reset;
+    @include focus-ring;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+    padding: 0;
+    font-family: $font-sans;
+    font-size: 12px;
+    font-weight: 500;
+    color: $text;
+
+    &:hover {
+        color: #fff;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+    }
+}
+
+.field-area {
+    color: $text-muted;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.field-remove {
+    @include button-reset;
+    @include focus-ring($danger);
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    color: $text-muted;
+    font-size: 15px;
+    line-height: 1;
+    transition:
+        background-color $transition,
+        color $transition;
+
+    &:hover {
+        background-color: rgb(248 113 113 / 18%);
+        color: $danger;
+    }
+}
+
+// ---- soil -------------------------------------------------------------------
+
+.soil-panel {
+    @include section-divider;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.soil-opacity {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    color: $text-muted;
+
+    input[type="range"] {
+        width: 100%;
+        margin: 0;
+        accent-color: $accent;
+    }
+}
+
+// ---- top-right controls -----------------------------------------------------
+
+.map-controls {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 1;
+    margin: $gap;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+
+    button {
+        @include button(solid);
+
+        &.active {
+            @include active-state;
+        }
+
+        &.primary {
+            @include button(primary);
+        }
+    }
+}
+
+// ---- map markers & popups ---------------------------------------------------
+
+.corner-handle {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background-color: #fff;
+    border: 3px solid $info;
+    box-shadow:
+        0 0 0 4px rgb(59 130 246 / 25%),
+        0 2px 6px rgb(0 0 0 / 40%);
+    cursor: move;
+    transition: box-shadow $transition;
+
+    &:hover {
+        box-shadow:
+            0 0 0 6px rgb(59 130 246 / 35%),
+            0 2px 6px rgb(0 0 0 / 40%);
+    }
+}
+
+.field-tooltip {
+    pointer-events: none;
+
+    .mapboxgl-popup-content {
+        @include glass-panel;
+        padding: 8px 12px;
+        border-radius: $radius;
+        font-size: 12px;
+        pointer-events: none;
+    }
+
+    .mapboxgl-popup-tip {
+        display: none;
+    }
+}
+
+.field-tooltip-name {
+    font-weight: 600;
+}
+
+.field-tooltip-details {
+    color: $text-muted;
+}
+
+.soil-popup {
+    .mapboxgl-popup-content {
+        padding: 10px 28px 10px 12px;
+        border-radius: $radius;
+        box-shadow: $shadow-light;
+        font-family: $font-sans;
+        font-size: 12px;
+        color: $page-text;
+    }
+
+    .mapboxgl-popup-close-button {
+        top: 4px;
+        right: 4px;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        font-size: 16px;
+        line-height: 1;
+        color: $page-muted;
+
+        &:hover {
+            background-color: #f1f5f9;
+        }
+    }
+}
+
+.soil-popup-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.soil-popup-row {
+    color: $page-muted;
+    font-variant-numeric: tabular-nums;
+}

@@ -1,0 +1,151 @@
+@use "tokens" as *;
+
+// translucent dark card floating over the map
+@mixin glass-panel {
+    background-color: $surface;
+    backdrop-filter: $blur;
+    -webkit-backdrop-filter: $blur;
+    border: 1px solid $border;
+    border-radius: $radius-lg;
+    box-shadow: $shadow;
+    color: $text;
+    font-family: $font-sans;
+}
+
+@mixin thin-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: $border-strong transparent;
+
+    &::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    &::-webkit-scrollbar-thumb {
+        background-color: $border-strong;
+        border-radius: $radius-pill;
+    }
+}
+
+@mixin focus-ring($color: $info) {
+    &:focus-visible {
+        outline: 2px solid $color;
+        outline-offset: 2px;
+    }
+}
+
+@mixin button-reset {
+    appearance: none;
+    margin: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+}
+
+// $variant: ghost | solid | primary | info
+@mixin button($variant: ghost, $size: md) {
+    @include button-reset;
+    @include focus-ring;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border-radius: $radius-pill;
+    font-family: $font-sans;
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+    transition:
+        background-color $transition,
+        border-color $transition,
+        transform $transition,
+        box-shadow $transition;
+
+    @if $size == sm {
+        padding: 4px 10px;
+        font-size: 12px;
+    } @else {
+        padding: 8px 14px;
+        font-size: 13px;
+    }
+
+    &:active:not(:disabled) {
+        transform: translateY(1px);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: default;
+    }
+
+    @if $variant == ghost {
+        border: 1px solid $border-strong;
+        color: $text;
+        &:hover:not(:disabled) {
+            background-color: $surface-hover;
+        }
+    } @else if $variant == solid {
+        @include glass-panel;
+        border-radius: $radius-pill;
+        &:hover:not(:disabled) {
+            background-color: $surface-raised;
+        }
+    } @else if $variant == primary {
+        background-color: $accent;
+        color: #fff;
+        box-shadow: 0 6px 18px -6px rgb(16 185 129 / 70%);
+        &:hover:not(:disabled) {
+            background-color: $accent-strong;
+        }
+    } @else if $variant == info {
+        background-color: $info;
+        color: #fff;
+        &:hover:not(:disabled) {
+            background-color: #2563eb;
+        }
+    }
+}
+
+@mixin active-state {
+    background-color: $info;
+    border-color: $info;
+    color: #fff;
+}
+
+@mixin section-divider {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid $border;
+}
+
+@mixin eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: $text-muted;
+}
+
+@mixin dark-input {
+    box-sizing: border-box;
+    padding: 8px 12px;
+    border: 1px solid $border-strong;
+    border-radius: $radius-sm;
+    background-color: rgb(255 255 255 / 6%);
+    color: $text;
+    font-family: $font-sans;
+    font-size: 13px;
+    transition:
+        border-color $transition,
+        background-color $transition;
+
+    &::placeholder {
+        color: $text-faint;
+    }
+    &:focus {
+        outline: none;
+        border-color: $info;
+        background-color: rgb(255 255 255 / 10%);
+    }
+}

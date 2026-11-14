@@ -1,4 +1,4 @@
-import "./CropsPage.css"
+import "./CropsPage.scss"
 import { useEffect, useState } from "react"
 import { Link } from "react-router"
 

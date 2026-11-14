@@ -1,0 +1,49 @@
+// design tokens shared by every stylesheet; pull in with
+// `@use "<path>/styles/tokens" as *;`
+
+$font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+$font-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+
+// surfaces (dark glass over the map)
+$surface: rgb(15 23 42 / 72%);
+$surface-solid: #0f172a;
+$surface-raised: rgb(30 41 59 / 80%);
+$surface-hover: rgb(255 255 255 / 8%);
+$border: rgb(255 255 255 / 10%);
+$border-strong: rgb(255 255 255 / 18%);
+
+// text
+$text: #f1f5f9;
+$text-muted: rgb(226 232 240 / 65%);
+$text-faint: rgb(226 232 240 / 45%);
+
+// light pages (crops, strategy)
+$page-bg: #f6f7f4;
+$page-card: #ffffff;
+$page-text: #0f172a;
+$page-muted: #64748b;
+$page-border: #e2e8f0;
+
+// accents
+$accent: #10b981;
+$accent-strong: #059669;
+$accent-soft: rgb(16 185 129 / 18%);
+$info: #3b82f6;
+$info-soft: rgb(59 130 246 / 20%);
+$warn: #fbbf24;
+$danger: #f87171;
+$danger-strong: #dc2626;
+
+// shape
+$radius-sm: 8px;
+$radius: 12px;
+$radius-lg: 16px;
+$radius-pill: 999px;
+
+$shadow: 0 10px 30px -10px rgb(0 0 0 / 50%), 0 2px 6px rgb(0 0 0 / 20%);
+$shadow-light: 0 1px 2px rgb(15 23 42 / 6%), 0 8px 24px -12px rgb(15 23 42 / 18%);
+$blur: blur(14px) saturate(160%);
+
+$gap: 12px;
+$ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+$transition: 160ms $ease;
