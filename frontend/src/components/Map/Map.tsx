@@ -12,6 +12,7 @@ import "mapbox-gl/dist/mapbox-gl.css"
 
 import LocationSearch, { SearchResult } from "../LocationSearch/LocationSearch"
 import NdviDebug from "../NdviDebug/NdviDebug"
+import SentinelPanel from "../SentinelPanel/SentinelPanel"
 import { Bounds, Point } from "../../data/point"
 import {
     Field,
@@ -686,6 +687,9 @@ function Map({
                     </button>
                 )}
             </div>
+            {selectedFields.length > 0 && (
+                <SentinelPanel fields={selectedFields} />
+            )}
             {showNdvi && selectedFields.length > 0 && (
                 <NdviDebug
                     fields={selectedFields}
