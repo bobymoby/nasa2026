@@ -34,7 +34,8 @@ Every endpoint takes the area as two corners, `top_left=<lat>,<lon>` (north-west
 | `GET /api/drought/season` | Daily bucket trace (soil water, Ks, ETa) for one crop and harvest year |
 | `GET /api/fields/ndvi` | One rectangular plot: period timeline from Sentinel-2 NDVI (2017+) as `{periods: [{start, end, type, crop_type, confidence}]}`; type is barren / crop / dormant_crop / green_cover; `detail=true` returns the full analysis |
 | `POST /api/fields/ndvi` | Several plots. Either the frontend's picked fields, `{"fields": [{"id", "polygon": [{"lat", "lng"}, ...]}]}` (same shape as `/api/crops/fields`), or plain outlines, `{"plots": [[[lat, lon], ...], ...]}`; plus `fromYear`/`toYear` and the GET options (snake_case or camelCase). Returns one `{id?, periods}` body per plot in input order, with `error` for a plot that failed |
-| `GET /api/sentinel/search` / `image` / `stats` | Raw Sentinel Hub Catalog / Process / Statistical API |
+| `GET /api/sentinel/search` / `image` / `stats` | Raw Sentinel Hub Catalog / Process / Statistical API; `image?type=ndvi-color` renders NDVI as a coloured PNG |
+| `GET /api/soil/point?lat=&lng=` | Most probable WRB soil groups at a point from ISRIC SoilGrids (250 m), cached in `backend/.cache/soilgrids/` |
 
 Sources: ERA5 via the Open-Meteo archive API (`models=era5`, no key), NASA POWER (no key),
 Sentinel-2 via Sentinel Hub (`SH_CLIENT_ID`, `SH_CLIENT_SECRET`, `SH_DEPLOYMENT` in the

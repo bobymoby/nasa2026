@@ -62,7 +62,24 @@ function evaluatePixel(s) {
   return { ndvi: [ndvi], dataMask: [s.dataMask && !cloudy ? 1 : 0] };
 }"""
 
-EVALSCRIPTS = {"truecolor": EVAL_TRUECOLOR, "ndvi": EVAL_NDVI}
+# NDVI as a coloured RGBA image for display; clouds, shadows and snow are transparent.
+# Keep the stops in sync with NDVI_LEGEND in the frontend's SentinelPanel.
+EVAL_NDVI_COLOR = """//VERSION=3
+function setup() {
+  return { input: ["B04","B08","SCL","dataMask"], output: { bands: 4 } };
+}
+const stops = [-0.2, 0, 0.2, 0.4, 0.6, 0.8];
+const colors = [
+  [0.65, 0.0, 0.15], [0.84, 0.19, 0.15], [0.99, 0.68, 0.38],
+  [0.85, 0.94, 0.55], [0.40, 0.74, 0.39], [0.0, 0.41, 0.22]
+];
+function evaluatePixel(s) {
+  if (s.dataMask == 0 || [3,8,9,10,11].includes(s.SCL)) return [0, 0, 0, 0];
+  const ndvi = (s.B08 - s.B04) / (s.B08 + s.B04);
+  return [...colorBlend(ndvi, stops, colors), 1];
+}"""
+
+EVALSCRIPTS = {"truecolor": EVAL_TRUECOLOR, "ndvi": EVAL_NDVI, "ndvi-color": EVAL_NDVI_COLOR}
 
 
 class SentinelHubError(RuntimeError):
