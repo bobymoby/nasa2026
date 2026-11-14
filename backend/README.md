@@ -21,11 +21,21 @@ fastapi dev app/main.py
 - Docs: http://localhost:8000/docs
 - Health check: http://localhost:8000/api/health
 
-## Sentinel Hub
+## Data endpoints
 
-Set `SH_CLIENT_ID`, `SH_CLIENT_SECRET` and optionally `SH_DEPLOYMENT` (`cdse` default, or `sh`)
-in the repo-root `.env` or `backend/.env`. Endpoints (bbox is `min_lon,min_lat,max_lon,max_lat`):
+Every endpoint takes the area as two corners, `top_left=<lat>,<lon>` (north-west) and
+`bottom_right=<lat>,<lon>` (south-east). Full parameter docs: http://localhost:8000/docs
 
-- `GET /api/sentinel/search?bbox=23.2,42.6,23.4,42.75&from=2025-06-01&to=2025-06-30&max_cloud=20`
-- `GET /api/sentinel/image?bbox=...&from=...&to=...&type=ndvi&format=tiff` (`type`: truecolor|ndvi, `format`: tiff|png|jpeg)
-- `GET /api/sentinel/stats?bbox=...&from=2025-03-01&to=2025-10-31&interval=P10D&format=csv` (`format`: json|csv)
+| Endpoint | What |
+| --- | --- |
+| `GET /api/climate/daily` | Daily weather, `source=era5\|power`, optional `with_et0=true` |
+| `GET /api/climate/heat-frost` | Test 1: July heat, wheat-flowering heat and April frost days per year, ERA5 vs POWER |
+| `GET /api/drought` | Test 2: FAO-56 ET₀ + 150 mm bucket, seasonal shortfall and FAO-33 relative yield per crop/year |
+| `GET /api/drought/season` | Daily bucket trace (soil water, Ks, ETa) for one crop and harvest year |
+| `GET /api/sentinel/field-ndvi` | Test 3: clear-sky field NDVI curves 2017+, peak month, bare months, crop guess |
+| `GET /api/sentinel/search` / `image` / `stats` | Raw Sentinel Hub Catalog / Process / Statistical API |
+
+Sources: ERA5 via the Open-Meteo archive API (`models=era5`, no key), NASA POWER (no key),
+Sentinel-2 via Sentinel Hub (`SH_CLIENT_ID`, `SH_CLIENT_SECRET`, `SH_DEPLOYMENT` in the
+repo-root `.env` or `backend/.env`). Upstream responses are cached in `backend/.cache/`;
+the first 44-year ERA5 request for an area takes ~20–60 s.
