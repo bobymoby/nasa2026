@@ -3,24 +3,12 @@ import { useEffect, useState } from "react"
 import { Link } from "react-router"
 
 import { Crop, fetchCrops } from "../../api/fetchCrops"
-import { AreaSelection } from "../../data/point"
+import { AreaSelection, describeSelection } from "../../data/point"
 
 type Props = {
     selection: AreaSelection
     selectedCrops: string[]
     onSelectedCropsChange: (ids: string[]) => void
-}
-
-function describeSelection(selection: AreaSelection): string {
-    if (selection.kind === "fields") {
-        const count = selection.fields.length
-        return `${count} field${count === 1 ? "" : "s"} (${selection.areaHa.toFixed(2)} ha)`
-    }
-    const { topLeft, bottomRight } = selection.bounds
-    return (
-        `top-left ${topLeft.lat.toFixed(4)}, ${topLeft.lng.toFixed(4)} · ` +
-        `bottom-right ${bottomRight.lat.toFixed(4)}, ${bottomRight.lng.toFixed(4)}`
-    )
 }
 
 function CropsPage({
@@ -103,9 +91,20 @@ function CropsPage({
                             </li>
                         ))}
                     </ul>
-                    <p className="crops-count">
-                        {selectedCrops.length} of {crops.length} selected
-                    </p>
+                    <div className="crops-footer">
+                        <p className="crops-count">
+                            {selectedCrops.length} of {crops.length} selected
+                        </p>
+                        {selectedCrops.length > 0 ? (
+                            <Link to="/strategy" className="crops-next">
+                                Build strategies →
+                            </Link>
+                        ) : (
+                            <span className="crops-next disabled">
+                                Pick a crop to continue
+                            </span>
+                        )}
+                    </div>
                 </>
             )}
         </div>
