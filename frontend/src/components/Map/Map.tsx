@@ -668,7 +668,7 @@ function Map({
                         Clear selection
                     </button>
                 )}
-                {bounds && !isSelecting && (
+                {(bounds || selectedFields.length > 0) && !isSelecting && (
                     <button className="primary" onClick={onConfirm}>
                         Select crops →
                     </button>

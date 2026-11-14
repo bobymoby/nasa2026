@@ -95,9 +95,10 @@ def field_tile(
 
 @router.get("/{field_id}", summary="One field as a GeoJSON feature (WGS84)")
 def field(field_id: str) -> dict:
-    with pool.connection() as conn:
-        conn.row_factory = dict_row
-        row = conn.execute(FIELD_SQL, {"field_id": field_id}).fetchone()
+    # row_factory on the cursor, not the pooled connection, or it leaks into
+    # whichever request reuses the connection next
+    with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        row = cur.execute(FIELD_SQL, {"field_id": field_id}).fetchone()
 
     if row is None:
         raise HTTPException(404, f"Field {field_id} not found")
