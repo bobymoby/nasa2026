@@ -1,0 +1,11 @@
+erbet
+ndvi
+sentinel/****sentinelhub
+copernicus
+mapbox
+
+общини любен
+https://shapps.dataspace.copernicus.eu/dashboard/#/
+
+sh-a21fc82d-ebba-4c55-bf9f-d5e31750c8c3
+JXOV9KYso5lK3x3OoyXMLxrG0KEPxAGNUPU7Tm7UxcbuFNhRtXgH4CmELNeimqIT72BfaNFQawXqMhVvO46Juq	secret
