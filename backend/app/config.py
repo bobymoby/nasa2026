@@ -20,5 +20,8 @@ class Settings(BaseSettings):
     )
     sh_deployment: Literal["cdse", "sh"] = "cdse"
 
+    # PostGIS database from the repo-root docker-compose.yml
+    database_url: str = "postgresql://nasa:nasa@localhost:5432/nasa"
+
 
 settings = Settings()

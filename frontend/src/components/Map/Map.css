@@ -196,3 +196,66 @@ button.sidebar.panel-toggle {
     box-shadow: 0 1px 4px rgb(0 0 0 / 40%);
     cursor: move;
 }
+
+.fields-panel {
+    margin-top: 12px;
+    padding-top: 8px;
+    border-top: 1px solid rgb(255 255 255 / 20%);
+}
+
+.fields-hint {
+    margin-top: 4px;
+    font-size: 12px;
+    color: rgb(255 255 255 / 70%);
+}
+
+.fields-list {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0;
+    max-height: 240px;
+    overflow-y: auto;
+    width: 264px;
+}
+
+.fields-list li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    padding: 2px 0;
+}
+
+.field-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+    padding: 0;
+    border: none;
+    background: none;
+    color: #fff;
+    font-family: monospace;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.field-name:hover {
+    text-decoration: underline;
+}
+
+.field-area {
+    color: rgb(255 255 255 / 70%);
+    white-space: nowrap;
+}
+
+.field-remove {
+    padding: 0 4px;
+    border: none;
+    background: none;
+    color: #fca5a5;
+    font-size: 14px;
+    cursor: pointer;
+}

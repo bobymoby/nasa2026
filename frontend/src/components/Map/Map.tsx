@@ -12,6 +12,13 @@ import "mapbox-gl/dist/mapbox-gl.css"
 
 import LocationSearch, { SearchResult } from "../LocationSearch/LocationSearch"
 import { Bounds, Point } from "../../data/point"
+import {
+    Field,
+    FIELD_TILES_LAYER,
+    FIELD_TILES_MIN_ZOOM,
+    FIELD_TILES_URL,
+    fetchField,
+} from "../../api/fetchField"
 
 const INITIAL_VIEW_STATE = {
     lat: 43.429,
@@ -28,6 +35,33 @@ const STYLES = {
 }
 
 const SELECTION_SOURCE_ID = "selection"
+const FIELDS_SOURCE_ID = "fields"
+const SELECTED_FIELDS_SOURCE_ID = "selected-fields"
+const FIELDS_FILL_LAYER_ID = "fields-fill"
+
+function selectedFieldsGeoJSON(
+    fields: Field[],
+): GeoJSONSourceSpecification["data"] {
+    return { type: "FeatureCollection", features: fields }
+}
+
+function fieldLabel({ properties }: Field): string {
+    return (
+        properties.crop_name_en ??
+        properties.crop_name ??
+        `Field ${properties.field_id}`
+    )
+}
+
+function fieldBounds({ geometry }: Field): LngLatBoundsLike {
+    const [ring] = geometry.coordinates
+    const lngs = ring.map(([lng]) => lng)
+    const lats = ring.map(([, lat]) => lat)
+    return [
+        [Math.min(...lngs), Math.min(...lats)],
+        [Math.max(...lngs), Math.max(...lats)],
+    ]
+}
 
 function boundsFromCorners(a: Point, b: Point): Bounds {
     return {
@@ -136,10 +170,14 @@ function createCornerMarker(): Marker {
 function Map({
     bounds,
     onBoundsChange,
+    selectedFields,
+    onSelectedFieldsChange,
     onConfirm,
 }: {
     bounds: Bounds | null
     onBoundsChange: (bounds: Bounds | null) => void
+    selectedFields: Field[]
+    onSelectedFieldsChange: (fields: Field[]) => void
     onConfirm: () => void
 }) {
     const mapRef = useRef<mapboxgl.Map>(null)
@@ -152,6 +190,8 @@ function Map({
         useState<CoordInputs>(EMPTY_COORD_INPUTS)
     const [coordError, setCoordError] = useState<string | null>(null)
     const [showPanel, setShowPanel] = useState(true)
+    const [zoom, setZoom] = useState(INITIAL_VIEW_STATE.zoom)
+    const [fieldError, setFieldError] = useState<string | null>(null)
 
     // style.load handlers need the latest selection without re-subscribing
     const selectionRef = useRef<Bounds | null>(null)
@@ -160,6 +200,13 @@ function Map({
     // parent passes a new callback
     const onBoundsChangeRef = useRef(onBoundsChange)
     onBoundsChangeRef.current = onBoundsChange
+    // same for the field click handler, which is registered once per mode
+    const selectedFieldsRef = useRef(selectedFields)
+    selectedFieldsRef.current = selectedFields
+    const onSelectedFieldsChangeRef = useRef(onSelectedFieldsChange)
+    onSelectedFieldsChangeRef.current = onSelectedFieldsChange
+    // field ids being fetched, so a double click doesn't add a field twice
+    const pendingFieldsRef = useRef(new Set<string>())
 
     const markersRef = useRef<{ topLeft: Marker; bottomRight: Marker } | null>(
         null,
@@ -187,9 +234,62 @@ function Map({
                   }),
         })
         mapRef.current = map
+        setZoom(map.getZoom())
+        map.on("zoomend", () => setZoom(map.getZoom()))
 
         // setStyle wipes custom sources/layers, so re-add them on every style load
         map.on("style.load", () => {
+            map.addSource(FIELDS_SOURCE_ID, {
+                type: "vector",
+                tiles: [FIELD_TILES_URL],
+                minzoom: FIELD_TILES_MIN_ZOOM,
+                maxzoom: 14,
+            })
+            map.addLayer({
+                id: FIELDS_FILL_LAYER_ID,
+                type: "fill",
+                source: FIELDS_SOURCE_ID,
+                "source-layer": FIELD_TILES_LAYER,
+                paint: { "fill-color": "#facc15", "fill-opacity": 0.15 },
+            })
+            map.addLayer({
+                id: "fields-outline",
+                type: "line",
+                source: FIELDS_SOURCE_ID,
+                "source-layer": FIELD_TILES_LAYER,
+                paint: {
+                    "line-color": "#ca8a04",
+                    "line-width": [
+                        "interpolate",
+                        ["linear"],
+                        ["zoom"],
+                        10,
+                        0.3,
+                        15,
+                        1.2,
+                    ],
+                },
+            })
+
+            // selected fields come from their full GeoJSON, so they stay
+            // visible below the tiles' min zoom
+            map.addSource(SELECTED_FIELDS_SOURCE_ID, {
+                type: "geojson",
+                data: selectedFieldsGeoJSON(selectedFieldsRef.current),
+            })
+            map.addLayer({
+                id: "selected-fields-fill",
+                type: "fill",
+                source: SELECTED_FIELDS_SOURCE_ID,
+                paint: { "fill-color": "#f97316", "fill-opacity": 0.5 },
+            })
+            map.addLayer({
+                id: "selected-fields-outline",
+                type: "line",
+                source: SELECTED_FIELDS_SOURCE_ID,
+                paint: { "line-color": "#c2410c", "line-width": 2 },
+            })
+
             map.addSource(SELECTION_SOURCE_ID, {
                 type: "geojson",
                 data: selectionGeoJSON(selectionRef.current),
@@ -244,6 +344,75 @@ function Map({
         )
         setCoordError(null)
     }, [bounds])
+
+    useEffect(() => {
+        const source = mapRef.current?.getSource(SELECTED_FIELDS_SOURCE_ID) as
+            | GeoJSONSource
+            | undefined
+        source?.setData(selectedFieldsGeoJSON(selectedFields))
+    }, [selectedFields])
+
+    // click a field to toggle it in the selection; disabled while drawing
+    // the rectangle so the two don't fight over mouse events
+    useEffect(() => {
+        const map = mapRef.current
+        if (!map || isSelecting) return
+
+        const canvas = map.getCanvas()
+        const onEnter = () => {
+            canvas.style.cursor = "pointer"
+        }
+        const onLeave = () => {
+            canvas.style.cursor = ""
+        }
+        const onClick = (e: MapMouseEvent) => {
+            // @types/geojson isn't installed, so mapbox's feature type has no
+            // `properties`; tiles always carry field_id as a string
+            const feature = e.features?.[0] as
+                | { properties?: { field_id?: unknown } }
+                | undefined
+            const fieldId = feature?.properties?.field_id
+            if (typeof fieldId !== "string") return
+
+            const current = selectedFieldsRef.current
+            if (current.some((f) => f.id === fieldId)) {
+                onSelectedFieldsChangeRef.current(
+                    current.filter((f) => f.id !== fieldId),
+                )
+                return
+            }
+
+            const pending = pendingFieldsRef.current
+            if (pending.has(fieldId)) return
+            pending.add(fieldId)
+            setFieldError(null)
+            fetchField(fieldId)
+                .then((field) => {
+                    const latest = selectedFieldsRef.current
+                    if (latest.some((f) => f.id === field.id)) return
+                    onSelectedFieldsChangeRef.current([...latest, field])
+                })
+                .catch((err) =>
+                    setFieldError(
+                        err instanceof Error
+                            ? err.message
+                            : "Failed to load field",
+                    ),
+                )
+                .finally(() => pending.delete(fieldId))
+        }
+
+        map.on("mouseenter", FIELDS_FILL_LAYER_ID, onEnter)
+        map.on("mouseleave", FIELDS_FILL_LAYER_ID, onLeave)
+        map.on("click", FIELDS_FILL_LAYER_ID, onClick)
+
+        return () => {
+            map.off("mouseenter", FIELDS_FILL_LAYER_ID, onEnter)
+            map.off("mouseleave", FIELDS_FILL_LAYER_ID, onLeave)
+            map.off("click", FIELDS_FILL_LAYER_ID, onClick)
+            canvas.style.cursor = ""
+        }
+    }, [isSelecting])
 
     // draggable corner markers
     useEffect(() => {
@@ -405,6 +574,75 @@ function Map({
                             <div className="coord-error">{coordError}</div>
                         )}
                     </form>
+                    <div className="fields-panel">
+                        <div className="sidebar-header">
+                            <span>Fields ({selectedFields.length})</span>
+                            {selectedFields.length > 0 && (
+                                <button
+                                    type="button"
+                                    className="panel-toggle"
+                                    onClick={() => onSelectedFieldsChange([])}
+                                >
+                                    Clear
+                                </button>
+                            )}
+                        </div>
+                        {zoom < FIELD_TILES_MIN_ZOOM ? (
+                            <div className="fields-hint">
+                                Zoom in to see fields
+                            </div>
+                        ) : (
+                            selectedFields.length === 0 && (
+                                <div className="fields-hint">
+                                    Click a field to select it
+                                </div>
+                            )
+                        )}
+                        {fieldError && (
+                            <div className="coord-error">{fieldError}</div>
+                        )}
+                        {selectedFields.length > 0 && (
+                            <ul className="fields-list">
+                                {selectedFields.map((field) => (
+                                    <li key={field.id}>
+                                        <button
+                                            type="button"
+                                            className="field-name"
+                                            title={fieldLabel(field)}
+                                            onClick={() =>
+                                                mapRef.current?.fitBounds(
+                                                    fieldBounds(field),
+                                                    { padding: 80, maxZoom: 16 },
+                                                )
+                                            }
+                                        >
+                                            {fieldLabel(field)}
+                                        </button>
+                                        <span className="field-area">
+                                            {field.properties.area_ha.toFixed(
+                                                2,
+                                            )}{" "}
+                                            ha
+                                        </span>
+                                        <button
+                                            type="button"
+                                            className="field-remove"
+                                            aria-label="Remove field"
+                                            onClick={() =>
+                                                onSelectedFieldsChange(
+                                                    selectedFields.filter(
+                                                        (f) => f.id !== field.id,
+                                                    ),
+                                                )
+                                            }
+                                        >
+                                            ×
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </div>
                 </div>
             ) : (
                 <button

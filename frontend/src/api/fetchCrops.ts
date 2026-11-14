@@ -1,6 +1,5 @@
 import { Bounds } from "../data/point"
-
-const API_URL = process.env.REACT_APP_API_URL ?? "http://localhost:8000"
+import { API_URL } from "./apiUrl"
 
 export type Crop = { id: string; name: string }
 
