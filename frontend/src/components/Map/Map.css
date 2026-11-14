@@ -73,7 +73,6 @@
     font-size: 12px;
 }
 
-
 .sidebar-header {
     display: flex;
     justify-content: space-between;
@@ -305,4 +304,14 @@ button.sidebar.panel-toggle {
 
 .soil-popup-row {
     color: #4b5563;
+}
+
+.fields-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.panel-toggle.active {
+    background-color: #3b82f6;
+    border-color: #3b82f6;
 }

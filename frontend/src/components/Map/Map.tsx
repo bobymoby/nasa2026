@@ -12,6 +12,7 @@ import mapboxgl, {
 import "mapbox-gl/dist/mapbox-gl.css"
 
 import LocationSearch, { SearchResult } from "../LocationSearch/LocationSearch"
+import NdviDebug from "../NdviDebug/NdviDebug"
 import SentinelPanel from "../SentinelPanel/SentinelPanel"
 import { INITIAL_VIEW_STATE, MAPBOX_ACCESS_TOKEN, STYLES } from "./mapConfig"
 import { fetchSoil, SOIL_LEGEND_URL, SOIL_TILES_URL } from "../../api/fetchSoil"
@@ -61,7 +62,8 @@ type FieldTileProperties = {
 // @types/geojson isn't installed, so mapbox's feature type has no `properties`
 function tileProperties(e: MapMouseEvent): FieldTileProperties | undefined {
     const feature = e.features?.[0] as
-        { properties?: FieldTileProperties } | undefined
+        | { properties?: FieldTileProperties }
+        | undefined
     return feature?.properties
 }
 
@@ -197,6 +199,7 @@ function Map({
     const [soilOpacity, setSoilOpacity] = useState(0.7)
     const soilOpacityRef = useRef(soilOpacity)
     soilOpacityRef.current = soilOpacity
+    const [showNdvi, setShowNdvi] = useState(false)
 
     // style.load handlers need the latest selection without re-subscribing
     const selectionRef = useRef<Bounds | null>(null)
@@ -433,7 +436,8 @@ function Map({
 
     useEffect(() => {
         const source = mapRef.current?.getSource(SELECTION_SOURCE_ID) as
-            GeoJSONSource | undefined
+            | GeoJSONSource
+            | undefined
         source?.setData(selectionGeoJSON(bounds))
     }, [bounds])
 
@@ -460,7 +464,8 @@ function Map({
 
     useEffect(() => {
         const source = mapRef.current?.getSource(SELECTED_FIELDS_SOURCE_ID) as
-            GeoJSONSource | undefined
+            | GeoJSONSource
+            | undefined
         source?.setData(selectedFieldsGeoJSON(selectedFields))
     }, [selectedFields])
 
@@ -672,13 +677,25 @@ function Map({
                         <div className="sidebar-header">
                             <span>Fields ({selectedFields.length})</span>
                             {selectedFields.length > 0 && (
-                                <button
-                                    type="button"
-                                    className="panel-toggle"
-                                    onClick={() => onSelectedFieldsChange([])}
-                                >
-                                    Clear
-                                </button>
+                                <span className="fields-actions">
+                                    <button
+                                        type="button"
+                                        className={`panel-toggle${showNdvi ? " active" : ""}`}
+                                        title="Send the selected field rings to /api/fields/ndvi"
+                                        onClick={() => setShowNdvi((s) => !s)}
+                                    >
+                                        NDVI debug
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="panel-toggle"
+                                        onClick={() =>
+                                            onSelectedFieldsChange([])
+                                        }
+                                    >
+                                        Clear
+                                    </button>
+                                </span>
                             )}
                         </div>
                         <label className="organic-toggle">
@@ -814,6 +831,13 @@ function Map({
             </div>
             {selectedFields.length > 0 && (
                 <SentinelPanel fields={selectedFields} />
+            )}
+            {showNdvi && selectedFields.length > 0 && (
+                <NdviDebug
+                    fields={selectedFields}
+                    fieldLabel={fieldLabel}
+                    onClose={() => setShowNdvi(false)}
+                />
             )}
             <div id="map-container" ref={mapContainerRef} />
         </div>
