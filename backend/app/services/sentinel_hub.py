@@ -1,0 +1,249 @@
+"""Sentinel Hub client (Copernicus Data Space Ecosystem or commercial sentinel-hub.com).
+
+Authenticates with OAuth client credentials. Credentials only work on the
+deployment they were created on:
+    cdse -> https://shapps.dataspace.copernicus.eu/dashboard/#/account/settings
+    sh   -> https://apps.sentinel-hub.com/dashboard/#/account/settings
+"""
+
+import threading
+import time
+
+import httpx
+
+DEPLOYMENTS = {
+    "cdse": {
+        "token_url": "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token",
+        "base_url": "https://sh.dataspace.copernicus.eu",
+    },
+    "sh": {
+        "token_url": "https://services.sentinel-hub.com/auth/realms/main/protocol/openid-connect/token",
+        "base_url": "https://services.sentinel-hub.com",
+    },
+}
+
+WGS84 = "http://www.opengis.net/def/crs/EPSG/0/4326"
+
+# ---------------------------------------------------------------- evalscripts
+
+EVAL_TRUECOLOR = """//VERSION=3
+function setup() {
+  return { input: ["B02","B03","B04","dataMask"], output: { bands: 4 } };
+}
+function evaluatePixel(s) {
+  const g = 2.5;
+  return [g*s.B04, g*s.B03, g*s.B02, s.dataMask];
+}"""
+
+EVAL_NDVI = """//VERSION=3
+function setup() {
+  return { input: ["B04","B08","SCL","dataMask"],
+           output: { bands: 1, sampleType: "FLOAT32" } };
+}
+function evaluatePixel(s) {
+  // mask clouds/shadows/snow using the L2A scene classification
+  if (s.dataMask == 0 || [3,8,9,10,11].includes(s.SCL)) return [NaN];
+  return [(s.B08 - s.B04) / (s.B08 + s.B04)];
+}"""
+
+EVAL_NDVI_STATS = """//VERSION=3
+function setup() {
+  return {
+    input: [{ bands: ["B04","B08","SCL","dataMask"] }],
+    output: [
+      { id: "ndvi", bands: 1, sampleType: "FLOAT32" },
+      { id: "dataMask", bands: 1 }
+    ]
+  };
+}
+function evaluatePixel(s) {
+  const cloudy = [3,8,9,10,11].includes(s.SCL);
+  const ndvi = (s.B08 - s.B04) / (s.B08 + s.B04);
+  return { ndvi: [ndvi], dataMask: [s.dataMask && !cloudy ? 1 : 0] };
+}"""
+
+EVALSCRIPTS = {"truecolor": EVAL_TRUECOLOR, "ndvi": EVAL_NDVI}
+
+
+class SentinelHubError(RuntimeError):
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+# ---------------------------------------------------------------- client
+
+
+class SentinelHub:
+    def __init__(self, client_id: str, client_secret: str, deployment: str = "cdse"):
+        if deployment not in DEPLOYMENTS:
+            raise ValueError(f"deployment must be one of {list(DEPLOYMENTS)}")
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.token_url = DEPLOYMENTS[deployment]["token_url"]
+        self.base = DEPLOYMENTS[deployment]["base_url"]
+        self.http = httpx.Client(timeout=120)
+        self._token: str | None = None
+        self._expires = 0.0
+        self._lock = threading.Lock()
+
+    def close(self) -> None:
+        self.http.close()
+
+    # OAuth2 client-credentials flow, token cached until shortly before expiry
+    def token(self) -> str:
+        with self._lock:
+            if self._token is None or time.time() > self._expires - 60:
+                r = self.http.post(
+                    self.token_url,
+                    data={
+                        "grant_type": "client_credentials",
+                        "client_id": self.client_id,
+                        "client_secret": self.client_secret,
+                    },
+                    timeout=30,
+                )
+                if r.status_code != 200:
+                    raise SentinelHubError(
+                        f"Token request failed ({r.status_code}): {r.text}",
+                        r.status_code,
+                    )
+                j = r.json()
+                self._token = j["access_token"]
+                self._expires = time.time() + j.get("expires_in", 600)
+            return self._token
+
+    def _post(self, path: str, payload: dict, accept: str | None = None) -> httpx.Response:
+        for attempt in range(4):
+            headers = {"Authorization": f"Bearer {self.token()}"}
+            if accept:
+                headers["Accept"] = accept
+            r = self.http.post(self.base + path, json=payload, headers=headers)
+            if r.status_code == 429:  # rate limited -> back off
+                time.sleep(2**attempt)
+                continue
+            if r.status_code == 401 and attempt == 0:  # token expired -> refresh once
+                self._token = None
+                continue
+            if not r.is_success:
+                raise SentinelHubError(
+                    f"{path} failed ({r.status_code}): {r.text}", r.status_code
+                )
+            return r
+        raise SentinelHubError(f"{path}: rate-limited, giving up", 429)
+
+    # -------- Catalog API (STAC search)
+    def search(
+        self, bbox, t_from, t_to, collection="sentinel-2-l2a", max_cloud=None, limit=100
+    ) -> list[dict]:
+        payload = {
+            "bbox": bbox,
+            "datetime": f"{t_from}T00:00:00Z/{t_to}T23:59:59Z",
+            "collections": [collection],
+            "limit": min(limit, 100),
+        }
+        if max_cloud is not None:
+            payload["filter"] = f"eo:cloud_cover < {max_cloud}"
+            payload["filter-lang"] = "cql2-text"
+        features: list[dict] = []
+        while True:
+            j = self._post(
+                "/api/v1/catalog/1.0.0/search", payload, accept="application/geo+json"
+            ).json()
+            features += j.get("features", [])
+            nxt = j.get("context", {}).get("next")
+            if nxt is None or len(features) >= limit:
+                return features[:limit]
+            payload["next"] = nxt
+
+    # -------- Process API (imagery)
+    def image(
+        self,
+        bbox,
+        t_from,
+        t_to,
+        evalscript,
+        fmt="image/tiff",
+        width=512,
+        height=512,
+        collection="sentinel-2-l2a",
+        max_cloud=100,
+    ) -> bytes:
+        payload = {
+            "input": {
+                "bounds": {"bbox": bbox, "properties": {"crs": WGS84}},
+                "data": [
+                    {
+                        "type": collection,
+                        "dataFilter": {
+                            "timeRange": {
+                                "from": f"{t_from}T00:00:00Z",
+                                "to": f"{t_to}T23:59:59Z",
+                            },
+                            "maxCloudCoverage": max_cloud,
+                            "mosaickingOrder": "leastCC",
+                        },
+                    }
+                ],
+            },
+            "output": {
+                "width": width,
+                "height": height,
+                "responses": [{"identifier": "default", "format": {"type": fmt}}],
+            },
+            "evalscript": evalscript,
+        }
+        return self._post("/api/v1/process", payload, accept=fmt).content
+
+    # -------- Statistical API (time series)
+    def stats(
+        self,
+        bbox,
+        t_from,
+        t_to,
+        evalscript,
+        interval="P10D",
+        res_deg=0.0001,
+        collection="sentinel-2-l2a",
+        max_cloud=100,
+    ) -> dict:
+        payload = {
+            "input": {
+                "bounds": {"bbox": bbox, "properties": {"crs": WGS84}},
+                "data": [
+                    {"type": collection, "dataFilter": {"maxCloudCoverage": max_cloud}}
+                ],
+            },
+            "aggregation": {
+                "timeRange": {"from": f"{t_from}T00:00:00Z", "to": f"{t_to}T23:59:59Z"},
+                "aggregationInterval": {"of": interval},
+                "evalscript": evalscript,
+                "resx": res_deg,  # ~10 m at mid-latitudes
+                "resy": res_deg,
+            },
+            "calculations": {"default": {}},
+        }
+        return self._post("/api/v1/statistics", payload).json()
+
+
+def summarize_ndvi_stats(raw: dict) -> list[dict]:
+    """Flatten a Statistical API response into one row per interval with data."""
+    rows = []
+    for item in raw.get("data", []):
+        if "error" in item:
+            continue
+        b = item["outputs"]["ndvi"]["bands"]["B0"]["stats"]
+        if b.get("sampleCount", 0) == b.get("noDataCount", 0):
+            continue  # fully cloudy / no data in this interval
+        rows.append(
+            {
+                "from": item["interval"]["from"][:10],
+                "to": item["interval"]["to"][:10],
+                "mean": b.get("mean"),
+                "stDev": b.get("stDev"),
+                "min": b.get("min"),
+                "max": b.get("max"),
+                "valid_px": b["sampleCount"] - b["noDataCount"],
+            }
+        )
+    return rows
