@@ -36,7 +36,7 @@ Every endpoint takes the area as two corners, `top_left=<lat>,<lon>` (north-west
 | `POST /api/fields/ndvi`                        | Several plots. Either the frontend's picked fields, `{"fields": [{"id", "polygon": [{"lat", "lng"}, ...]}]}` (same shape as `/api/crops/fields`), or plain outlines, `{"plots": [[[lat, lon], ...], ...]}`; plus `fromYear`/`toYear` and the GET options (snake_case or camelCase). Returns one `{id?, periods}` body per plot in input order, with `error` for a plot that failed |
 | `POST /api/fields/ndvi/prefetch`               | Same body; starts fetching the plots' Sentinel-2 data in the background and returns 202 at once. The frontend calls it when a field is picked                                                                                                                                                                                                                                      |
 | `GET /api/sentinel/search` / `image` / `stats` | Raw Sentinel Hub Catalog / Process / Statistical API; `image?type=ndvi-color` renders NDVI as a coloured PNG                                                                                                                                                                                                                                                                       |
-| `GET /api/soil/point?lat=&lng=`                | Most probable WRB soil groups at a point from ISRIC SoilGrids (250 m), cached in `backend/.cache/soilgrids/`                                                                                                                                                                                                                                                                       |
+| `GET /api/soil/point?lat=&lng=`                | Most probable WRB soil groups at a point from ISRIC SoilGrids (250 m), cached in Postgres (`json_cache`)                                                                                                                                                                                                                                                                           |
 | `GET /api/sentinel/soil-characteristics`       | Sentinel Hub Statistical API spectral indicators and historical series                                                                                                                                                                                                                                                                                                             |
 
 Timing logs: every Copernicus request, cache hit/miss and pipeline step is logged with its
@@ -50,5 +50,7 @@ The years of one plot are fetched in parallel, with at most 10 Copernicus reques
 
 Sources: ERA5 via the Open-Meteo archive API (`models=era5`, no key), NASA POWER (no key),
 Sentinel-2 via Sentinel Hub (`SH_CLIENT_ID`, `SH_CLIENT_SECRET`, `SH_DEPLOYMENT` in the
-repo-root `.env` or `backend/.env`). Upstream responses are cached in `backend/.cache/`;
-the first 44-year ERA5 request for an area takes ~20–60 s.
+repo-root `.env` or `backend/.env`). Upstream responses (ERA5, NASA POWER, SoilGrids) are cached in Postgres
+(`json_cache`, created on first use; `DATABASE_URL`); the first 44-year ERA5 request for an
+area takes ~20–60 s. If the database is down, requests still work, uncached. To carry over an
+old `backend/.cache/` folder: `.venv/bin/python -m app.import_file_cache`, then delete the folder.

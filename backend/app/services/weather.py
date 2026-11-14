@@ -4,6 +4,7 @@ Both sources are gridded point services, so a rectangle is sampled on the
 source's grid and the daily values are averaged across the sample points.
 """
 
+import statistics
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -19,9 +20,11 @@ POWER_URL = "https://power.larc.nasa.gov/api/temporal/daily/point"
 
 # our variable name -> source variable name
 ERA5_VARS = {
+    "tmean": "temperature_2m_mean",  # °C
     "tmax": "temperature_2m_max",  # °C
     "tmin": "temperature_2m_min",  # °C
     "precip": "precipitation_sum",  # mm
+    "rh_mean": "relative_humidity_2m_mean",  # %
     "rh_max": "relative_humidity_2m_max",  # %
     "rh_min": "relative_humidity_2m_min",  # %
     "wind10": "wind_speed_10m_mean",  # m/s at 10 m
@@ -171,3 +174,60 @@ def power_daily(rect: Rect, start: date, end: date) -> DailySeries:
         elevation=sum(loc["geometry"]["coordinates"][2] for loc in locs) / len(locs),
         meta={"provider": "NASA POWER daily point API (MERRA-2 based)", "grid_deg": 0.5},
     )
+
+
+# ---------------------------------------------------------------- monthly
+
+
+# output field -> DailySeries variable
+MONTHLY_FIELDS = {
+    "temperature": "tmean",
+    "max_temperature": "tmax",
+    "min_temperature": "tmin",
+    "precipitation": "precip",
+    "humidity": "rh_mean",
+    "solar_radiation": "rs",
+    "wind_speed": "wind10",
+}
+
+
+def monthly_summary(series: DailySeries) -> list[dict]:
+    """Aggregate an ERA5 DailySeries into one row per calendar month.
+
+    Temperatures, humidity, radiation and wind are means of the daily
+    values; precipitation is the monthly total, None if any day is
+    missing so a gap never reads as a dry spell.
+
+    Each field also gets `<field>_std`: the sample standard deviation of
+    that month's daily values (day-to-day variability; for precipitation
+    that is of daily totals, mm/day). None with fewer than 2 days.
+    """
+    by_month: dict[str, list[int]] = {}
+    for i, d in enumerate(series.dates):
+        by_month.setdefault(f"{d.year:04d}-{d.month:02d}", []).append(i)
+
+    def present(var: str, idx: list[int]) -> list[float]:
+        return [v for v in (series.values[var][i] for i in idx) if v is not None]
+
+    def mean(var: str, idx: list[int]) -> float | None:
+        vals = present(var, idx)
+        return round(statistics.fmean(vals), 2) if vals else None
+
+    def total(var: str, idx: list[int]) -> float | None:
+        vals = [series.values[var][i] for i in idx]
+        if not vals or any(v is None for v in vals):
+            return None
+        return round(sum(vals), 2)
+
+    def std(var: str, idx: list[int]) -> float | None:
+        vals = present(var, idx)
+        return round(statistics.stdev(vals), 2) if len(vals) >= 2 else None
+
+    rows = []
+    for month, idx in by_month.items():
+        row = {"month": month}
+        for name, var in MONTHLY_FIELDS.items():
+            row[name] = total(var, idx) if name == "precipitation" else mean(var, idx)
+            row[f"{name}_std"] = std(var, idx)
+        rows.append(row)
+    return rows

@@ -4,9 +4,10 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Query
 
 from app.geo import RectQuery
+from app.models.climate import MonthlyWeather
 from app.services import heat_frost
 from app.services.drought import et0_series
-from app.services.weather import WeatherError, era5_daily, power_daily
+from app.services.weather import WeatherError, era5_daily, monthly_summary, power_daily
 
 router = APIRouter(prefix="/climate", tags=["climate"])
 
@@ -46,6 +47,35 @@ def daily(
         "elevation_m": round(s.elevation),
         "meta": s.meta,
         "days": s.rows(),
+    }
+
+
+@router.get(
+    "/monthly",
+    summary="Monthly weather for a rectangle (ERA5)",
+    response_model=MonthlyWeather,
+)
+def monthly(
+    rect: RectQuery,
+    from_year: Annotated[int, Query(ge=1940, description="First year (inclusive)")],
+    to_year: Annotated[int, Query(ge=1940, description="Last year (inclusive)")],
+):
+    """One row per calendar month from January of `from_year` to December of
+    `to_year`: mean / mean-daily-max / mean-daily-min temperature (°C), total
+    precipitation (mm), mean relative humidity (%), mean daily shortwave
+    radiation (MJ/m²/day) and mean 10 m wind speed (m/s). Months are UTC."""
+    years = check_years(from_year, to_year)
+    try:
+        s = era5_daily(rect, date(years[0], 1, 1), date(years[-1], 12, 31))
+    except WeatherError as e:
+        raise HTTPException(502, str(e))
+    return {
+        "source": s.meta["provider"],
+        "rect": rect.as_dict(),
+        "points": s.points,
+        "from_year": from_year,
+        "to_year": to_year,
+        "months": monthly_summary(s),
     }
 
 

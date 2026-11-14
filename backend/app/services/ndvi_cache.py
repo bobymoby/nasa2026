@@ -20,7 +20,7 @@ import threading
 from concurrent.futures import Future
 from typing import Callable
 
-from app.db import pool
+from app.db import ensure_table, pool
 from app.timing import emit
 
 log = logging.getLogger("app.ndvi_cache")
@@ -52,22 +52,12 @@ ON CONFLICT (cache_key, year, version)
 DO UPDATE SET rows = EXCLUDED.rows, fetched_at = EXCLUDED.fetched_at
 """
 
-_table_ready = False
-_table_lock = threading.Lock()
-
 _inflight: dict[tuple, Future] = {}
 _inflight_lock = threading.Lock()
 
 
 def _ensure_table() -> None:
-    global _table_ready
-    if _table_ready:
-        return
-    with _table_lock:
-        if not _table_ready:
-            with pool.connection(timeout=5) as conn:
-                conn.execute(DDL)
-            _table_ready = True
+    ensure_table("ndvi_year_cache", DDL)
 
 
 def _get(key: str, year: int, version: str) -> list[dict] | None:
