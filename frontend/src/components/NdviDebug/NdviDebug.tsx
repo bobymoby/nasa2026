@@ -1,4 +1,4 @@
-import "./NdviDebug.css"
+import "./NdviDebug.scss"
 import { useEffect, useRef, useState } from "react"
 import { Field } from "../../api/fetchField"
 import {

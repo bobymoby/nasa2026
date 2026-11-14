@@ -1,4 +1,4 @@
-import "./Map.css"
+import "./Map.scss"
 import { useRef, useEffect, useState } from "react"
 import mapboxgl, {
     GeoJSONSource,
@@ -15,7 +15,8 @@ import LocationSearch, { SearchResult } from "../LocationSearch/LocationSearch"
 import NdviDebug from "../NdviDebug/NdviDebug"
 import SentinelPanel from "../SentinelPanel/SentinelPanel"
 import { INITIAL_VIEW_STATE, MAPBOX_ACCESS_TOKEN, STYLES } from "./mapConfig"
-import { fetchSoil, SOIL_LEGEND_URL, SOIL_TILES_URL } from "../../api/fetchSoil"
+import SoilLegend from "../SoilLegend/SoilLegend"
+import { fetchSoil, LngLatBox, SOIL_TILES_URL } from "../../api/fetchSoil"
 import { Bounds, Point } from "../../data/point"
 import {
     Field,
@@ -192,6 +193,8 @@ function Map({
 
     const [showPanel, setShowPanel] = useState(true)
     const [zoom, setZoom] = useState(INITIAL_VIEW_STATE.zoom)
+    // what's on screen, for the soil legend
+    const [viewBox, setViewBox] = useState<LngLatBox | null>(null)
     const [fieldError, setFieldError] = useState<string | null>(null)
     const [showOrganic, setShowOrganic] = useState(true)
     const showOrganicRef = useRef(showOrganic)
@@ -245,6 +248,14 @@ function Map({
         mapRef.current = map
         setZoom(map.getZoom())
         map.on("zoomend", () => setZoom(map.getZoom()))
+        const updateViewBox = () => {
+            const b = map.getBounds()
+            if (b) {
+                setViewBox([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()])
+            }
+        }
+        map.on("load", updateViewBox)
+        map.on("moveend", updateViewBox)
 
         // right mouse button inspects soil instead of rotating the map
         map.dragRotate.disable()
@@ -793,13 +804,10 @@ function Map({
                                 }
                             />
                         </label>
-                        <details className="soil-legend">
-                            <summary>Legend</summary>
-                            <img
-                                src={SOIL_LEGEND_URL}
-                                alt="Soil group legend"
-                            />
-                        </details>
+                        <SoilLegend
+                            box={viewBox}
+                            enabled={soilOpacity > 0}
+                        />
                     </div>
                 </div>
             ) : (
