@@ -210,17 +210,13 @@ def _cache_key(kind: str, ident: str, buffer_m: float) -> str:
     return f"{kind}:{ident}:b{buffer_m:g}"
 
 
-def _plot_ident(plot_id: str | None, points: list[tuple[float, float]]) -> str:
-    """'field:<id>' when given (stable across requests), else 'outline:<hash>'."""
-    if plot_id is not None:
-        return f"field:{plot_id}"
-    rounded = [[round(lat, 7), round(lon, 7)] for lat, lon in points]
-    return "outline:" + hashlib.sha256(json.dumps(rounded).encode()).hexdigest()[:24]
-
-
 def _plot_key(plot_id: str | None, points: list[tuple[float, float]], buffer_m: float) -> str:
-    kind, ident = _plot_ident(plot_id, points).split(":", 1)
-    return _cache_key(kind, ident, buffer_m)
+    """Field id when given (stable across requests), else a hash of the outline."""
+    if plot_id is not None:
+        return _cache_key("field", plot_id, buffer_m)
+    rounded = [[round(lat, 7), round(lon, 7)] for lat, lon in points]
+    digest = hashlib.sha256(json.dumps(rounded).encode()).hexdigest()[:24]
+    return _cache_key("outline", digest, buffer_m)
 
 
 def _evaluate(
@@ -354,15 +350,8 @@ class SuitabilityRequest(PlotsInput):
     )
 
 
-@router.post(
-    "/suitability",
-    summary="Several plots: crops suited to each, best first (FAO GAEZ v4)",
-)
-def plots_suitability(req: SuitabilityRequest) -> list[dict]:
-    """Rainfed suitability for the 1981-2010 climate, from FAO GAEZ v4, one list
-    per plot in input order. GAEZ cells are ~9 km, so plots in the same cell
-    get the same list."""
-    plots, out = [], []
+def _plot_cells(req: PlotsInput) -> tuple[list[dict], list[tuple[int, gaez.Cell]]]:
+    out, cells = [], []
     for plot_id, points in req.outlines():
         head = {"id": plot_id} if plot_id is not None else {}
         try:
@@ -370,14 +359,23 @@ def plots_suitability(req: SuitabilityRequest) -> list[dict]:
         except ValueError as e:
             out.append({**head, "crops": [], "error": str(e)})
             continue
-        plots.append((len(out), _plot_ident(plot_id, points), point.y, point.x))
+        cells.append((len(out), gaez.Cell.at(point.y, point.x)))
         out.append(head)
+    return out, cells
 
+
+@router.post(
+    "/suitability",
+    summary="Several plots: crops suited to each, best first (FAO GAEZ v4)",
+)
+def plots_suitability(req: SuitabilityRequest) -> list[dict]:
+    """Rainfed suitability for the 1981-2010 climate, one list per plot in input
+    order. GAEZ cells are ~9 km, so plots in the same cell get the same list."""
+    out, cells = _plot_cells(req)
     with timed("POST /fields/suitability", logging.INFO, plots=len(out), input_level=req.input_level):
-        cells = gaez.plot_cells([(key, lat, lon) for _, key, lat, lon in plots])
-        values = gaez.cells_values(req.input_level, set(cells))
+        values = gaez.cells_values(req.input_level, {c for _, c in cells})
         groups = set(req.groups) if req.groups else None
-        for (i, _, _, _), cell in zip(plots, cells):
+        for i, cell in cells:
             lat, lon = cell.center
             got = values[cell]
             body: dict = {
@@ -392,6 +390,16 @@ def plots_suitability(req: SuitabilityRequest) -> list[dict]:
                 body["crops"] = gaez.crop_list(req.input_level, got, req.min_class, groups)
             out[i] = {**out[i], **body}
     return out
+
+
+@router.post(
+    "/suitability/prefetch",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Warm the GAEZ tiles under these plots in the background; returns immediately",
+)
+def plots_suitability_prefetch(req: SuitabilityRequest) -> dict:
+    _, cells = _plot_cells(req)
+    return {"tiles_queued": gaez.prefetch(req.input_level, {c for _, c in cells})}
 
 
 @router.get("/{field_id}", summary="One field as a GeoJSON feature (WGS84)")

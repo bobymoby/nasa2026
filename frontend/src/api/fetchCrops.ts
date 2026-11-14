@@ -1,5 +1,7 @@
 import { AreaSelection, Bounds, Point } from "../data/point"
 import { API_URL } from "./apiUrl"
+import { Field } from "./fetchField"
+import { toSelectedField } from "./fetchFieldNdvi"
 
 // GAEZ suitability classes, best first
 export type SuitabilityClass =
@@ -197,6 +199,19 @@ function combine(plots: PlotSuitability[]): CropsResult {
         .filter((c) => c.suitability >= MIN_SUITABILITY)
         .sort((a, b) => b.suitability - a.suitability)
     return { crops, cells: cells.size }
+}
+
+export function prefetchSuitability(fields: Field[]): void {
+    const selection: AreaSelection = {
+        kind: "fields",
+        fields: fields.map(toSelectedField),
+        areaHa: 0,
+    }
+    fetch(`${API_URL}/api/fields/suitability/prefetch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody(selection)),
+    }).catch(() => {})
 }
 
 export async function fetchCrops(

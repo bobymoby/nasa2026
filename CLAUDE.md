@@ -60,7 +60,7 @@ DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose up -d db
 - **Caching. Everything is cached in Postgres; there are no file caches:**
   - `app/cache.py` provides `cached_json(namespace, key, fetch)`. It stores generic upstream responses in the `json_cache` table.
   - `services/ndvi_cache.py` stores per-year NDVI observations in `ndvi_year_cache`, keyed by field id or outline hash plus the inward buffer. Finished years are kept forever; the current year expires after 1 day. Concurrent fetches of the same plot and year are deduplicated.
-  - `services/gaez.py` uses relational tables keyed by GAEZ's own ids: `gaez_crop`, `gaez_layer`, `gaez_cell`, `gaez_cell_fetch`, `gaez_cell_value` and `gaez_plot_cell`.
+  - `services/gaez.py` reads FAO's GeoTIFFs with rasterio and stores 1° tiles (`gaez_tile`, `gaez_tile_fetch`, `gaez_tile_value`, plus `gaez_crop`, `gaez_layer`). A missing tile loads its whole 10° region. Nothing is cached per plot.
   - Tables are created lazily with `ensure_table` in `app/db.py`.
   - Every cache must degrade gracefully: if the database is down, the request still succeeds, uncached.
 - **Field parcels.** Field outlines come from the PostGIS table `bulgaria_data` (EPSG:3035). The map loads them as vector tiles (`/fields/tiles/...`) and fetches one full field on click.
@@ -70,5 +70,5 @@ DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose up -d db
 
 - **App state.** `src/Router.tsx` holds the app state: the drawn `bounds`, `selectedFields` and `selectedCrops`. It turns these into an `AreaSelection` (`src/data/point.ts`), which is either a rectangle or a set of fields, never both. That selection is passed to `/crops` (`CropsPage`).
 - **API clients.** Each endpoint has a client function in `src/api/`. For example, `fetchCrops.ts` calls `/api/fields/suitability`: it splits a rectangle along the ~9 km GAEZ grid and averages each crop over the area.
-- **Map.** `components/Map/Map.tsx` owns Mapbox, the field tile layer, the soil WMS layer, the right-click soil popup, and the NDVI prefetch that runs when a field is picked.
+- **Map.** `components/Map/Map.tsx` owns Mapbox, the field tile layer, the soil WMS layer and the right-click soil popup. A clicked field is selected at once from its vector-tile feature. The full outline (`GET /fields/{id}`), the NDVI prefetch and the suitability prefetch run in the background; the UI never waits on them.
 - **Styles.** SCSS files import shared tokens and mixins from `src/styles/` with `@use "../../styles/tokens" as *;`.
