@@ -70,7 +70,21 @@ export default function AppRouter() {
                     )
                 }
             />
-            <Route path="/strategy" element={<StrategyPage />} />
+            <Route
+                path="/strategy"
+                element={
+                    !selection ? (
+                        <Navigate to="/" replace />
+                    ) : selectedCrops.length === 0 ? (
+                        <Navigate to="/crops" replace />
+                    ) : (
+                        <StrategyPage
+                            selection={selection}
+                            crops={selectedCrops}
+                        />
+                    )
+                }
+            />
         </Routes>
     )
 }

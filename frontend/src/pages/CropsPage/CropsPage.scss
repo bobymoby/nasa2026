@@ -213,8 +213,29 @@
     font-variant-numeric: tabular-nums;
 }
 
-.crops-count {
+.crops-footer {
+    display: flex;
     margin-top: 16px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.crops-count {
+    margin: 0;
     font-size: 13px;
     font-weight: 500;
+}
+
+.crops-next {
+    @include button(primary);
+    text-decoration: none;
+
+    &.disabled {
+        background-color: $page-border;
+        color: $page-muted;
+        box-shadow: none;
+        cursor: default;
+    }
 }

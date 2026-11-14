@@ -26,7 +26,8 @@ export type CropGroup =
     | "tree"
 
 export type Crop = {
-    id: string // GAEZ crop code, e.g. "whe"
+    id: string // crop name as a slug ("wheat", "dry_pea"), the ids /api/strategies uses
+    code: string // GAEZ crop code, e.g. "whe"
     name: string
     group: CropGroup
     suitability: number // 0-100, averaged over the area
@@ -127,6 +128,13 @@ function boundsPlots({ topLeft, bottomRight }: Bounds): Point[][] {
     )
 }
 
+function cropId(name: string): string {
+    return name
+        .toLowerCase()
+        .replace(/[^a-z]+/g, "_")
+        .replace(/^_|_$/g, "")
+}
+
 function requestBody(selection: AreaSelection): object {
     const plots =
         selection.kind === "bounds"
@@ -153,7 +161,8 @@ function combine(plots: PlotSuitability[]): CropsResult {
             if (!sum) {
                 sum = {
                     crop: {
-                        id: c.code,
+                        id: cropId(c.crop),
+                        code: c.code,
                         name: c.crop,
                         group: c.group,
                         suitability: 0,
