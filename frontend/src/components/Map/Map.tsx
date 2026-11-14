@@ -11,6 +11,7 @@ import mapboxgl, {
 import "mapbox-gl/dist/mapbox-gl.css"
 
 import LocationSearch, { SearchResult } from "../LocationSearch/LocationSearch"
+import SentinelPanel from "../SentinelPanel/SentinelPanel"
 import { Bounds, Point } from "../../data/point"
 import {
     Field,
@@ -674,6 +675,9 @@ function Map({
                     </button>
                 )}
             </div>
+            {selectedFields.length > 0 && (
+                <SentinelPanel fields={selectedFields} />
+            )}
             <div id="map-container" ref={mapContainerRef} />
         </div>
     )
