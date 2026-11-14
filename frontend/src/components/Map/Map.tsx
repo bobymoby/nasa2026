@@ -11,6 +11,7 @@ import mapboxgl, {
 import "mapbox-gl/dist/mapbox-gl.css"
 
 import LocationSearch, { SearchResult } from "../LocationSearch/LocationSearch"
+import NdviDebug from "../NdviDebug/NdviDebug"
 import { Bounds, Point } from "../../data/point"
 import {
     Field,
@@ -192,6 +193,7 @@ function Map({
     const [showPanel, setShowPanel] = useState(true)
     const [zoom, setZoom] = useState(INITIAL_VIEW_STATE.zoom)
     const [fieldError, setFieldError] = useState<string | null>(null)
+    const [showNdvi, setShowNdvi] = useState(false)
 
     // style.load handlers need the latest selection without re-subscribing
     const selectionRef = useRef<Bounds | null>(null)
@@ -578,13 +580,23 @@ function Map({
                         <div className="sidebar-header">
                             <span>Fields ({selectedFields.length})</span>
                             {selectedFields.length > 0 && (
-                                <button
-                                    type="button"
-                                    className="panel-toggle"
-                                    onClick={() => onSelectedFieldsChange([])}
-                                >
-                                    Clear
-                                </button>
+                                <span className="fields-actions">
+                                    <button
+                                        type="button"
+                                        className={`panel-toggle${showNdvi ? " active" : ""}`}
+                                        title="Send the selected field rings to /api/fields/ndvi"
+                                        onClick={() => setShowNdvi((s) => !s)}
+                                    >
+                                        NDVI debug
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="panel-toggle"
+                                        onClick={() => onSelectedFieldsChange([])}
+                                    >
+                                        Clear
+                                    </button>
+                                </span>
                             )}
                         </div>
                         {zoom < FIELD_TILES_MIN_ZOOM ? (
@@ -674,6 +686,13 @@ function Map({
                     </button>
                 )}
             </div>
+            {showNdvi && selectedFields.length > 0 && (
+                <NdviDebug
+                    fields={selectedFields}
+                    fieldLabel={fieldLabel}
+                    onClose={() => setShowNdvi(false)}
+                />
+            )}
             <div id="map-container" ref={mapContainerRef} />
         </div>
     )
