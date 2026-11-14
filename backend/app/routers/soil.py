@@ -2,7 +2,7 @@
 
 The map draws the soil layer straight from ISRIC's WMS; this endpoint only
 answers "what is here" on click. The SoilGrids REST API is slow (~4 s) and
-rate-limited (about 5 requests a minute), so answers are cached on disk.
+rate-limited (about 5 requests a minute), so answers are cached in Postgres.
 """
 
 from typing import Annotated
