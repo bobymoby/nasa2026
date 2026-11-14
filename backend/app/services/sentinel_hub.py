@@ -8,6 +8,7 @@ deployment they were created on:
 
 import threading
 import time
+from datetime import date, timedelta
 
 import httpx
 
@@ -98,13 +99,19 @@ class SentinelHubError(RuntimeError):
 
 
 class SentinelHub:
-    def __init__(self, client_id: str, client_secret: str, deployment: str = "cdse"):
+    def __init__(
+        self,
+        client_id: str,
+        client_secret: str,
+        deployment: str = "cdse",
+    ):
         if deployment not in DEPLOYMENTS:
             raise ValueError(f"deployment must be one of {list(DEPLOYMENTS)}")
         self.client_id = client_id
         self.client_secret = client_secret
         self.token_url = DEPLOYMENTS[deployment]["token_url"]
         self.base = DEPLOYMENTS[deployment]["base_url"]
+        self.deployment = deployment
         self.http = httpx.Client(timeout=120)
         self._token: str | None = None
         self._expires = 0.0
@@ -237,9 +244,15 @@ class SentinelHub:
         collection="sentinel-2-l2a",
         max_cloud=100,
         geometry: dict | None = None,
+        end_exclusive: bool = False,
     ) -> dict:
         """With `geometry` (GeoJSON polygon, lon/lat) only pixels inside it count."""
         resx, resy = res_deg if isinstance(res_deg, tuple) else (res_deg, res_deg)
+        end_time = (
+            f"{date.fromisoformat(t_to) + timedelta(days=1)}T00:00:00Z"
+            if end_exclusive
+            else f"{t_to}T23:59:59Z"
+        )
         bounds = {"geometry": geometry} if geometry else {"bbox": bbox}
         payload = {
             "input": {
@@ -249,7 +262,10 @@ class SentinelHub:
                 ],
             },
             "aggregation": {
-                "timeRange": {"from": f"{t_from}T00:00:00Z", "to": f"{t_to}T23:59:59Z"},
+                "timeRange": {
+                    "from": f"{t_from}T00:00:00Z",
+                    "to": end_time,
+                },
                 "aggregationInterval": {"of": interval},
                 "evalscript": evalscript,
                 "resx": resx,  # degrees; ~10 m pixels for field work

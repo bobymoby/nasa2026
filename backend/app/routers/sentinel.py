@@ -14,6 +14,7 @@ from app.services.sentinel_hub import (
     SentinelHubError,
     summarize_ndvi_stats,
 )
+from app.services.soil import get_soil_characteristics
 
 router = APIRouter(prefix="/sentinel", tags=["sentinel"])
 
@@ -23,7 +24,9 @@ IMAGE_FORMATS = {"tiff": "image/tiff", "png": "image/png", "jpeg": "image/jpeg"}
 @lru_cache
 def _client() -> SentinelHub:
     return SentinelHub(
-        settings.sh_client_id, settings.sh_client_secret, settings.sh_deployment
+        settings.sh_client_id,
+        settings.sh_client_secret,
+        settings.sh_deployment,
     )
 
 
@@ -146,3 +149,21 @@ def stats(
             headers={"Content-Disposition": 'attachment; filename="ndvi.csv"'},
         )
     return rows
+
+
+@router.get(
+    "/soil-characteristics",
+    summary="Field-scale Sentinel-2 L2A spectral indicators and historical series",
+)
+def soil_characteristics(
+    sh: Client,
+    rect: RectQuery,
+    t_from: DateFrom,
+    t_to: DateTo,
+):
+    try:
+        return get_soil_characteristics(sh, rect.bbox, t_from, t_to)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    except SentinelHubError as e:
+        raise _upstream(e) from e
