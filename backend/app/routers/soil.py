@@ -5,16 +5,22 @@ answers "what is here" on click. The SoilGrids REST API is slow (~4 s) and
 rate-limited (about 5 requests a minute), so answers are cached in Postgres.
 """
 
+from collections.abc import Callable
 from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 
-from app.geo import RectQuery
 from app.cache import cached_json
+from app.geo import RectQuery
 from app.routers.sentinel import Client, DateFrom, DateTo
 from app.services.sentinel_hub import SentinelHubError
 from app.services.soil import get_soil_characteristics
+from app.services.soilgrids import (
+    SoilGridsError,
+    get_soil_chemistry,
+    get_soil_physical,
+)
 
 router = APIRouter(prefix="/soil", tags=["soil"])
 
@@ -60,6 +66,38 @@ def soil_at_point(
         }
 
     return cached_json("soilgrids", {"lat": lat, "lng": lng, "classes": classes}, fetch)
+
+
+def _soilgrids_response(fetch: Callable[[], dict]) -> dict:
+    try:
+        return fetch()
+    except SoilGridsError as exc:
+        status_code = 503 if exc.status_code == 429 else 502
+        raise HTTPException(status_code, str(exc)) from exc
+
+
+@router.get(
+    "/chemistry",
+    summary="Soil chemistry from SoilGrids at a point",
+)
+def soil_chemistry(
+    lat: Annotated[float, Query(ge=-90, le=90)],
+    lng: Annotated[float, Query(ge=-180, le=180)],
+) -> dict:
+    lat, lng = round(lat, COORD_DECIMALS), round(lng, COORD_DECIMALS)
+    return _soilgrids_response(lambda: get_soil_chemistry(lat, lng))
+
+
+@router.get(
+    "/physical",
+    summary="Soil physical properties from SoilGrids at a point",
+)
+def soil_physical(
+    lat: Annotated[float, Query(ge=-90, le=90)],
+    lng: Annotated[float, Query(ge=-180, le=180)],
+) -> dict:
+    lat, lng = round(lat, COORD_DECIMALS), round(lng, COORD_DECIMALS)
+    return _soilgrids_response(lambda: get_soil_physical(lat, lng))
 
 
 @router.get(
