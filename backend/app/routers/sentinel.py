@@ -1,6 +1,5 @@
 import csv
 import io
-from datetime import date
 from functools import lru_cache
 from typing import Annotated, Literal
 
@@ -8,7 +7,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.config import settings
 from app.geo import RectQuery
-from app.services.ndvi import S2_FIRST_YEAR, field_observations, year_metrics
 from app.services.sentinel_hub import (
     EVAL_NDVI_STATS,
     EVALSCRIPTS,
@@ -147,43 +145,3 @@ def stats(
             headers={"Content-Disposition": 'attachment; filename="ndvi.csv"'},
         )
     return rows
-
-
-@router.get(
-    "/field-ndvi",
-    summary="Test 3: field greenness curve per year with peak, bare months and crop guess",
-)
-def field_ndvi(
-    sh: Client,
-    rect: RectQuery,
-    from_year: Annotated[int, Query(ge=S2_FIRST_YEAR)] = 2017,
-    to_year: Annotated[int, Query(ge=S2_FIRST_YEAR)] = 2024,
-    min_clear: Annotated[
-        float, Query(gt=0, le=1, description="Minimum cloud-free share of field pixels")
-    ] = 0.8,
-    bare_threshold: Annotated[float, Query(description="Monthly NDVI below this = bare")] = 0.2,
-):
-    if from_year > to_year or to_year > date.today().year:
-        raise HTTPException(422, "invalid year range")
-    years = []
-    try:
-        for y in range(from_year, to_year + 1):
-            obs = field_observations(sh, rect, y, min_clear)
-            years.append({"year": y, **year_metrics(obs, bare_threshold), "curve": obs})
-    except SentinelHubError as e:
-        raise _upstream(e)
-
-    peaks = [y["peak_value"] for y in years if y.get("peak_value") is not None]
-    avg_peak = round(sum(peaks) / len(peaks), 3) if peaks else None
-    for y in years:
-        if avg_peak and y.get("peak_value") is not None:
-            y["peak_vs_average"] = round(y["peak_value"] - avg_peak, 3)
-            y["peak_ratio"] = round(y["peak_value"] / avg_peak, 3)
-    return {
-        "rect": rect.as_dict(),
-        "average_peak": avg_peak,
-        "crop_sequence": [
-            {"year": y["year"], "crop_type_guess": y.get("crop_type_guess")} for y in years
-        ],
-        "years": years,
-    }

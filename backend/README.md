@@ -32,7 +32,7 @@ Every endpoint takes the area as two corners, `top_left=<lat>,<lon>` (north-west
 | `GET /api/climate/heat-frost` | Test 1: July heat, wheat-flowering heat and April frost days per year, ERA5 vs POWER |
 | `GET /api/drought` | Test 2: FAO-56 ET₀ + 150 mm bucket, seasonal shortfall and FAO-33 relative yield per crop/year |
 | `GET /api/drought/season` | Daily bucket trace (soil water, Ks, ETa) for one crop and harvest year |
-| `GET /api/sentinel/field-ndvi` | Test 3: clear-sky field NDVI curves 2017+, peak month, bare months, crop guess |
+| `GET /api/fields/ndvi` | Field greenness: cleaned Sentinel-2 NDVI (2017+), crop seasons (emergence, peak, harvest, dormancy, double cropping), cover periods (crop / dormant_crop / bare / green_cover / uncertain) with confidence |
 | `GET /api/sentinel/search` / `image` / `stats` | Raw Sentinel Hub Catalog / Process / Statistical API |
 
 Sources: ERA5 via the Open-Meteo archive API (`models=era5`, no key), NASA POWER (no key),
