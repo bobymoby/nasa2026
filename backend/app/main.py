@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import crops, health
+from app.routers import health, sentinel, crops
 
 app = FastAPI(title=settings.app_name)
 
@@ -16,6 +16,7 @@ app.add_middleware(
 
 app.include_router(health.router, prefix="/api")
 app.include_router(crops.router, prefix="/api")
+app.include_router(sentinel.router, prefix="/api")
 
 
 @app.get("/")
