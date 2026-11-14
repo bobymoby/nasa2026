@@ -82,14 +82,15 @@ def image(
     rect: RectQuery,
     t_from: DateFrom,
     t_to: DateTo,
-    type: Literal["truecolor", "ndvi"] = "truecolor",
+    type: Literal["truecolor", "ndvi", "ndvi-color"] = "truecolor",
     format: Literal["tiff", "png", "jpeg"] = "tiff",
     width: Annotated[int, Query(ge=1, le=2500)] = 512,
     height: Annotated[int, Query(ge=1, le=2500)] = 512,
     collection: Collection = "sentinel-2-l2a",
     max_cloud: MaxCloud = None,
 ):
-    """NDVI is FLOAT32; use `format=tiff` to keep real values."""
+    """`ndvi` is FLOAT32; use `format=tiff` to keep real values.
+    `ndvi-color` is the same index as a coloured RGBA image for display."""
     fmt = IMAGE_FORMATS[format]
     try:
         data = sh.image(

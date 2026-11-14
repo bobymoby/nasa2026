@@ -52,6 +52,8 @@ WITH bounds AS (
 mvt AS (
     SELECT f.field_id,
            f."EC_hcat_n" AS crop_category,
+           f.organic = 1 AS organic,
+           round(f.field_size::numeric, 2)::float8 AS field_size,
            ST_AsMVTGeom(ST_Transform(f.geometry, 3857), b.env3857) AS geom
     FROM bulgaria_data f, bounds b
     WHERE f.geometry && b.env3035
