@@ -3,15 +3,31 @@ import { useEffect, useState } from "react"
 import { Link } from "react-router"
 
 import { Crop, fetchCrops } from "../../api/fetchCrops"
-import { Bounds } from "../../data/point"
+import { AreaSelection } from "../../data/point"
 
 type Props = {
-    bounds: Bounds
+    selection: AreaSelection
     selectedCrops: string[]
     onSelectedCropsChange: (ids: string[]) => void
 }
 
-function CropsPage({ bounds, selectedCrops, onSelectedCropsChange }: Props) {
+function describeSelection(selection: AreaSelection): string {
+    if (selection.kind === "fields") {
+        const count = selection.fields.length
+        return `${count} field${count === 1 ? "" : "s"} (${selection.areaHa.toFixed(2)} ha)`
+    }
+    const { topLeft, bottomRight } = selection.bounds
+    return (
+        `top-left ${topLeft.lat.toFixed(4)}, ${topLeft.lng.toFixed(4)} · ` +
+        `bottom-right ${bottomRight.lat.toFixed(4)}, ${bottomRight.lng.toFixed(4)}`
+    )
+}
+
+function CropsPage({
+    selection,
+    selectedCrops,
+    onSelectedCropsChange,
+}: Props) {
     const [crops, setCrops] = useState<Crop[] | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [reloadKey, setReloadKey] = useState(0)
@@ -21,7 +37,7 @@ function CropsPage({ bounds, selectedCrops, onSelectedCropsChange }: Props) {
         setCrops(null)
         setError(null)
 
-        fetchCrops(bounds, controller.signal)
+        fetchCrops(selection, controller.signal)
             .then(setCrops)
             .catch((err) => {
                 if (controller.signal.aborted) return
@@ -31,7 +47,7 @@ function CropsPage({ bounds, selectedCrops, onSelectedCropsChange }: Props) {
             })
 
         return () => controller.abort()
-    }, [bounds, reloadKey])
+    }, [selection, reloadKey])
 
     // drop previously picked crops that aren't available for this area
     useEffect(() => {
@@ -49,19 +65,13 @@ function CropsPage({ bounds, selectedCrops, onSelectedCropsChange }: Props) {
         )
     }
 
-    const { topLeft, bottomRight } = bounds
-
     return (
         <div className="crops-page">
             <Link to="/" className="crops-back">
                 ← Back to map
             </Link>
             <h1>Select crops</h1>
-            <p className="crops-area">
-                Area: top-left {topLeft.lat.toFixed(4)},{" "}
-                {topLeft.lng.toFixed(4)} · bottom-right{" "}
-                {bottomRight.lat.toFixed(4)}, {bottomRight.lng.toFixed(4)}
-            </p>
+            <p className="crops-area">Area: {describeSelection(selection)}</p>
 
             {error && (
                 <div className="crops-error">

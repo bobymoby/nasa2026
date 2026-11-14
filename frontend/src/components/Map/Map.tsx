@@ -6,28 +6,118 @@ import mapboxgl, {
     LngLatBoundsLike,
     MapMouseEvent,
     Marker,
+    Popup,
 } from "mapbox-gl"
 
 import "mapbox-gl/dist/mapbox-gl.css"
 
 import LocationSearch, { SearchResult } from "../LocationSearch/LocationSearch"
+import NdviDebug from "../NdviDebug/NdviDebug"
+import SentinelPanel from "../SentinelPanel/SentinelPanel"
+import { INITIAL_VIEW_STATE, MAPBOX_ACCESS_TOKEN, STYLES } from "./mapConfig"
+import { fetchSoil, SOIL_LEGEND_URL, SOIL_TILES_URL } from "../../api/fetchSoil"
 import { Bounds, Point } from "../../data/point"
-
-const INITIAL_VIEW_STATE = {
-    lat: 43.429,
-    lng: 27.2296,
-    zoom: 10,
-}
-
-const MAPBOX_ACCESS_TOKEN =
-    "pk.eyJ1IjoiYm9ieW1vYnkiLCJhIjoiY213Z2VqczgyMGowdTMwczhpd3R1MXRnNSJ9.lNQ7yevPuKvfQWJXtMZxPg"
-
-const STYLES = {
-    default: "mapbox://styles/mapbox/standard",
-    satellite: "mapbox://styles/mapbox/standard-satellite",
-}
+import {
+    Field,
+    FIELD_TILES_LAYER,
+    FIELD_TILES_MIN_ZOOM,
+    FIELD_TILES_URL,
+    fetchField,
+} from "../../api/fetchField"
+import { prefetchFieldNdvi } from "../../api/fetchFieldNdvi"
 
 const SELECTION_SOURCE_ID = "selection"
+const FIELDS_SOURCE_ID = "fields"
+const SELECTED_FIELDS_SOURCE_ID = "selected-fields"
+const FIELDS_FILL_LAYER_ID = "fields-fill"
+const ORGANIC_LAYER_ID = "fields-organic"
+const SOIL_SOURCE_ID = "soil"
+const SOIL_LAYER_ID = "soil"
+
+function soilPopupContent(
+    title: string,
+    rows: [string, string][] = [],
+): HTMLElement {
+    const el = document.createElement("div")
+    const heading = document.createElement("div")
+    heading.className = "soil-popup-title"
+    heading.textContent = title
+    el.append(heading)
+    for (const [name, value] of rows) {
+        const row = document.createElement("div")
+        row.className = "soil-popup-row"
+        row.textContent = `${name} ${value}`
+        el.append(row)
+    }
+    return el
+}
+
+// properties every field carries in the vector tiles
+type FieldTileProperties = {
+    field_id?: string
+    crop_category?: string
+    organic?: boolean
+    field_size?: number
+}
+
+// @types/geojson isn't installed, so mapbox's feature type has no `properties`
+function tileProperties(e: MapMouseEvent): FieldTileProperties | undefined {
+    const feature = e.features?.[0] as
+        | { properties?: FieldTileProperties }
+        | undefined
+    return feature?.properties
+}
+
+// "winter_common_soft_wheat" -> "Winter common soft wheat"
+function humanizeCategory(category: string): string {
+    const words = category.replace(/_/g, " ")
+    return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+function fieldTooltip(props: FieldTileProperties): HTMLElement {
+    const el = document.createElement("div")
+    const name = document.createElement("div")
+    name.className = "field-tooltip-name"
+    name.textContent = props.crop_category
+        ? humanizeCategory(props.crop_category)
+        : "Unknown crop"
+    el.append(name)
+
+    const details = document.createElement("div")
+    details.className = "field-tooltip-details"
+    details.textContent = [
+        props.field_size != null && `${props.field_size.toFixed(2)} ha`,
+        props.organic && "organic",
+    ]
+        .filter(Boolean)
+        .join(" · ")
+    if (details.textContent) el.append(details)
+    return el
+}
+
+function selectedFieldsGeoJSON(
+    fields: Field[],
+): GeoJSONSourceSpecification["data"] {
+    return { type: "FeatureCollection", features: fields }
+}
+
+function fieldLabel({ properties }: Field): string {
+    return (
+        properties.crop_name_en ??
+        properties.crop_name ??
+        `Field ${properties.field_id}`
+    )
+}
+
+function fieldBounds({ geometry }: Field): LngLatBoundsLike {
+    const [ring] = geometry.coordinates
+    const lngs = ring.map(([lng]) => lng)
+    const lats = ring.map(([, lat]) => lat)
+    return [
+        [Math.min(...lngs), Math.min(...lats)],
+        [Math.max(...lngs), Math.max(...lats)],
+    ]
+}
 
 function boundsFromCorners(a: Point, b: Point): Bounds {
     return {
@@ -75,58 +165,6 @@ function selectionGeoJSON(
     }
 }
 
-const COORD_FIELDS = [
-    { key: "topLeftLat", label: "Top-left lat", min: -90, max: 90 },
-    { key: "topLeftLng", label: "Top-left lng", min: -180, max: 180 },
-    { key: "bottomRightLat", label: "Bottom-right lat", min: -90, max: 90 },
-    { key: "bottomRightLng", label: "Bottom-right lng", min: -180, max: 180 },
-] as const
-
-type CoordKey = (typeof COORD_FIELDS)[number]["key"]
-type CoordInputs = Record<CoordKey, string>
-
-const EMPTY_COORD_INPUTS: CoordInputs = {
-    topLeftLat: "",
-    topLeftLng: "",
-    bottomRightLat: "",
-    bottomRightLng: "",
-}
-
-function boundsToCoordInputs({ topLeft, bottomRight }: Bounds): CoordInputs {
-    return {
-        topLeftLat: topLeft.lat.toFixed(6),
-        topLeftLng: topLeft.lng.toFixed(6),
-        bottomRightLat: bottomRight.lat.toFixed(6),
-        bottomRightLng: bottomRight.lng.toFixed(6),
-    }
-}
-
-function parseCoordInputs(inputs: CoordInputs): Bounds | string {
-    const values = {} as Record<CoordKey, number>
-    for (const { key, label, min, max } of COORD_FIELDS) {
-        const raw = inputs[key].trim()
-        const value = Number(raw)
-        if (raw === "" || !Number.isFinite(value)) {
-            return `${label} must be a number`
-        }
-        if (value < min || value > max) {
-            return `${label} must be between ${min} and ${max}`
-        }
-        values[key] = value
-    }
-
-    if (values.topLeftLat <= values.bottomRightLat) {
-        return "Top-left lat must be greater than bottom-right lat"
-    }
-    if (values.topLeftLng >= values.bottomRightLng) {
-        return "Top-left lng must be less than bottom-right lng"
-    }
-    return {
-        topLeft: { lat: values.topLeftLat, lng: values.topLeftLng },
-        bottomRight: { lat: values.bottomRightLat, lng: values.bottomRightLng },
-    }
-}
-
 function createCornerMarker(): Marker {
     const el = document.createElement("div")
     el.className = "corner-handle"
@@ -136,10 +174,14 @@ function createCornerMarker(): Marker {
 function Map({
     bounds,
     onBoundsChange,
+    selectedFields,
+    onSelectedFieldsChange,
     onConfirm,
 }: {
     bounds: Bounds | null
     onBoundsChange: (bounds: Bounds | null) => void
+    selectedFields: Field[]
+    onSelectedFieldsChange: (fields: Field[]) => void
     onConfirm: () => void
 }) {
     const mapRef = useRef<mapboxgl.Map>(null)
@@ -148,10 +190,17 @@ function Map({
     const [isSatellite, setIsSatellite] = useState(false)
     const [isSelecting, setIsSelecting] = useState(false)
 
-    const [coordInputs, setCoordInputs] =
-        useState<CoordInputs>(EMPTY_COORD_INPUTS)
-    const [coordError, setCoordError] = useState<string | null>(null)
     const [showPanel, setShowPanel] = useState(true)
+    const [zoom, setZoom] = useState(INITIAL_VIEW_STATE.zoom)
+    const [fieldError, setFieldError] = useState<string | null>(null)
+    const [showOrganic, setShowOrganic] = useState(true)
+    const showOrganicRef = useRef(showOrganic)
+    showOrganicRef.current = showOrganic
+    // the soil layer is always on; opacity 0 hides it and stops tile requests
+    const [soilOpacity, setSoilOpacity] = useState(0.7)
+    const soilOpacityRef = useRef(soilOpacity)
+    soilOpacityRef.current = soilOpacity
+    const [showNdvi, setShowNdvi] = useState(false)
 
     // style.load handlers need the latest selection without re-subscribing
     const selectionRef = useRef<Bounds | null>(null)
@@ -160,6 +209,13 @@ function Map({
     // parent passes a new callback
     const onBoundsChangeRef = useRef(onBoundsChange)
     onBoundsChangeRef.current = onBoundsChange
+    // same for the field click handler, which is registered once per mode
+    const selectedFieldsRef = useRef(selectedFields)
+    selectedFieldsRef.current = selectedFields
+    const onSelectedFieldsChangeRef = useRef(onSelectedFieldsChange)
+    onSelectedFieldsChangeRef.current = onSelectedFieldsChange
+    // field ids being fetched, so a double click doesn't add a field twice
+    const pendingFieldsRef = useRef(new Set<string>())
 
     const markersRef = useRef<{ topLeft: Marker; bottomRight: Marker } | null>(
         null,
@@ -187,9 +243,154 @@ function Map({
                   }),
         })
         mapRef.current = map
+        setZoom(map.getZoom())
+        map.on("zoomend", () => setZoom(map.getZoom()))
+
+        // right mouse button inspects soil instead of rotating the map
+        map.dragRotate.disable()
+        map.touchZoomRotate.disableRotation()
+
+        const soilPopup = new Popup({
+            className: "soil-popup",
+            maxWidth: "240px",
+        })
+        let soilController: AbortController | null = null
+        map.on("contextmenu", (e) => {
+            e.preventDefault()
+            e.originalEvent.preventDefault()
+            soilController?.abort()
+            const controller = new AbortController()
+            soilController = controller
+
+            soilPopup
+                .setLngLat(e.lngLat)
+                .setDOMContent(soilPopupContent("Loading soil…"))
+                .addTo(map)
+
+            fetchSoil(e.lngLat.lat, e.lngLat.lng, controller.signal)
+                .then((result) =>
+                    soilPopup.setDOMContent(
+                        result.soil
+                            ? soilPopupContent(
+                                  result.soil,
+                                  result.probabilities.map(
+                                      ({ soil, probability }) => [
+                                          soil,
+                                          `${probability}%`,
+                                      ],
+                                  ),
+                              )
+                            : soilPopupContent("No soil data here"),
+                    ),
+                )
+                .catch((err) => {
+                    if (controller.signal.aborted) return
+                    soilPopup.setDOMContent(
+                        soilPopupContent(
+                            err instanceof Error
+                                ? err.message
+                                : "Failed to load soil",
+                        ),
+                    )
+                })
+        })
 
         // setStyle wipes custom sources/layers, so re-add them on every style load
         map.on("style.load", () => {
+            map.addSource(SOIL_SOURCE_ID, {
+                type: "raster",
+                tiles: [SOIL_TILES_URL],
+                tileSize: 256,
+                attribution:
+                    '<a href="https://soilgrids.org">SoilGrids © ISRIC</a>',
+            })
+            map.addLayer({
+                id: SOIL_LAYER_ID,
+                type: "raster",
+                source: SOIL_SOURCE_ID,
+                // under the Standard style's labels and roads, and under the
+                // field layers, which have no slot and so draw on top
+                slot: "middle",
+                layout: {
+                    visibility: soilOpacityRef.current > 0 ? "visible" : "none",
+                },
+                paint: { "raster-opacity": soilOpacityRef.current },
+            })
+
+            map.addSource(FIELDS_SOURCE_ID, {
+                type: "vector",
+                tiles: [FIELD_TILES_URL],
+                minzoom: FIELD_TILES_MIN_ZOOM,
+                maxzoom: 14,
+            })
+            map.addLayer({
+                id: FIELDS_FILL_LAYER_ID,
+                type: "fill",
+                source: FIELDS_SOURCE_ID,
+                "source-layer": FIELD_TILES_LAYER,
+                paint: { "fill-color": "#facc15", "fill-opacity": 0.15 },
+            })
+            map.addLayer({
+                id: "fields-outline",
+                type: "line",
+                source: FIELDS_SOURCE_ID,
+                "source-layer": FIELD_TILES_LAYER,
+                paint: {
+                    "line-color": "#ca8a04",
+                    "line-width": [
+                        "interpolate",
+                        ["linear"],
+                        ["zoom"],
+                        10,
+                        0.3,
+                        15,
+                        1.2,
+                    ],
+                },
+            })
+
+            map.addLayer({
+                id: ORGANIC_LAYER_ID,
+                type: "line",
+                source: FIELDS_SOURCE_ID,
+                "source-layer": FIELD_TILES_LAYER,
+                filter: ["==", ["get", "organic"], true],
+                layout: {
+                    visibility: showOrganicRef.current ? "visible" : "none",
+                },
+                paint: {
+                    "line-color": "#16a34a",
+                    "line-width": [
+                        "interpolate",
+                        ["linear"],
+                        ["zoom"],
+                        10,
+                        1,
+                        15,
+                        3,
+                    ],
+                },
+            })
+
+            // selected fields come from their full GeoJSON, so they stay
+            // visible below the tiles' min zoom
+            map.addSource(SELECTED_FIELDS_SOURCE_ID, {
+                type: "geojson",
+                data: selectedFieldsGeoJSON(selectedFieldsRef.current),
+            })
+            map.addLayer({
+                id: "selected-fields-fill",
+                type: "fill",
+                source: SELECTED_FIELDS_SOURCE_ID,
+                paint: { "fill-color": "#f97316", "fill-opacity": 0.5 },
+            })
+            map.addLayer({
+                id: "selected-fields-outline",
+                type: "line",
+                source: SELECTED_FIELDS_SOURCE_ID,
+                paint: { "line-color": "#c2410c", "line-width": 2 },
+            })
+
             map.addSource(SELECTION_SOURCE_ID, {
                 type: "geojson",
                 data: selectionGeoJSON(selectionRef.current),
@@ -209,6 +410,8 @@ function Map({
         })
 
         return () => {
+            soilController?.abort()
+            soilPopup.remove()
             markersRef.current?.topLeft.remove()
             markersRef.current?.bottomRight.remove()
             markersRef.current = null
@@ -237,13 +440,115 @@ function Map({
             | GeoJSONSource
             | undefined
         source?.setData(selectionGeoJSON(bounds))
-
-        // keep the inputs in sync with drawn/cleared selections
-        setCoordInputs(
-            bounds ? boundsToCoordInputs(bounds) : EMPTY_COORD_INPUTS,
-        )
-        setCoordError(null)
     }, [bounds])
+
+    useEffect(() => {
+        const map = mapRef.current
+        if (!map?.getLayer(ORGANIC_LAYER_ID)) return
+        map.setLayoutProperty(
+            ORGANIC_LAYER_ID,
+            "visibility",
+            showOrganic ? "visible" : "none",
+        )
+    }, [showOrganic])
+
+    useEffect(() => {
+        const map = mapRef.current
+        if (!map?.getLayer(SOIL_LAYER_ID)) return
+        map.setLayoutProperty(
+            SOIL_LAYER_ID,
+            "visibility",
+            soilOpacity > 0 ? "visible" : "none",
+        )
+        map.setPaintProperty(SOIL_LAYER_ID, "raster-opacity", soilOpacity)
+    }, [soilOpacity])
+
+    useEffect(() => {
+        const source = mapRef.current?.getSource(SELECTED_FIELDS_SOURCE_ID) as
+            | GeoJSONSource
+            | undefined
+        source?.setData(selectedFieldsGeoJSON(selectedFields))
+    }, [selectedFields])
+
+    // click a field to toggle it in the selection; disabled while drawing
+    // the rectangle so the two don't fight over mouse events
+    useEffect(() => {
+        const map = mapRef.current
+        if (!map || isSelecting) return
+
+        const canvas = map.getCanvas()
+        const tooltip = new Popup({
+            closeButton: false,
+            closeOnClick: false,
+            className: "field-tooltip",
+            offset: 12,
+            maxWidth: "260px",
+        })
+        let hoveredFieldId: string | undefined
+
+        const onMove = (e: MapMouseEvent) => {
+            canvas.style.cursor = "pointer"
+            const props = tileProperties(e)
+            if (!props) return
+            // only rebuild the content when moving onto another field
+            if (props.field_id !== hoveredFieldId) {
+                hoveredFieldId = props.field_id
+                tooltip.setDOMContent(fieldTooltip(props))
+            }
+            tooltip.setLngLat(e.lngLat)
+            if (!tooltip.isOpen()) tooltip.addTo(map)
+        }
+        const onLeave = () => {
+            canvas.style.cursor = ""
+            hoveredFieldId = undefined
+            tooltip.remove()
+        }
+        const onClick = (e: MapMouseEvent) => {
+            const fieldId = tileProperties(e)?.field_id
+            if (typeof fieldId !== "string") return
+
+            const current = selectedFieldsRef.current
+            if (current.some((f) => f.id === fieldId)) {
+                onSelectedFieldsChangeRef.current(
+                    current.filter((f) => f.id !== fieldId),
+                )
+                return
+            }
+
+            const pending = pendingFieldsRef.current
+            if (pending.has(fieldId)) return
+            pending.add(fieldId)
+            setFieldError(null)
+            fetchField(fieldId)
+                .then((field) => {
+                    const latest = selectedFieldsRef.current
+                    if (latest.some((f) => f.id === field.id)) return
+                    onSelectedFieldsChangeRef.current([...latest, field])
+                    // start the slow Sentinel-2 fetch now, not when NDVI is run
+                    prefetchFieldNdvi([field])
+                })
+                .catch((err) =>
+                    setFieldError(
+                        err instanceof Error
+                            ? err.message
+                            : "Failed to load field",
+                    ),
+                )
+                .finally(() => pending.delete(fieldId))
+        }
+
+        map.on("mousemove", FIELDS_FILL_LAYER_ID, onMove)
+        map.on("mouseleave", FIELDS_FILL_LAYER_ID, onLeave)
+        map.on("click", FIELDS_FILL_LAYER_ID, onClick)
+
+        return () => {
+            map.off("mousemove", FIELDS_FILL_LAYER_ID, onMove)
+            map.off("mouseleave", FIELDS_FILL_LAYER_ID, onLeave)
+            map.off("click", FIELDS_FILL_LAYER_ID, onClick)
+            tooltip.remove()
+            canvas.style.cursor = ""
+        }
+    }, [isSelecting])
 
     // draggable corner markers
     useEffect(() => {
@@ -291,18 +596,6 @@ function Map({
         }
     }, [bounds])
 
-    const applyCoordInputs = (e: React.FormEvent) => {
-        e.preventDefault()
-        const result = parseCoordInputs(coordInputs)
-        if (typeof result === "string") {
-            setCoordError(result)
-            return
-        }
-        setIsSelecting(false)
-        onBoundsChange(result)
-        mapRef.current?.fitBounds(toLngLatBounds(result), { padding: 40 })
-    }
-
     const flyToResult = (result: SearchResult) => {
         const map = mapRef.current
         if (!map) return
@@ -330,6 +623,8 @@ function Map({
         canvas.style.cursor = "crosshair"
 
         const onDown = (e: MapMouseEvent) => {
+            // right button is for soil inspection
+            if (e.originalEvent.button !== 0) return
             start = e.lngLat
             onBoundsChangeRef.current(boundsFromCorners(start, start))
         }
@@ -381,30 +676,131 @@ function Map({
                         proximity={getMapCenter()}
                         onSelect={flyToResult}
                     />
-                    <form className="coord-form" onSubmit={applyCoordInputs}>
-                        {COORD_FIELDS.map(({ key, label, min, max }) => (
-                            <label key={key}>
-                                {label}
-                                <input
-                                    type="number"
-                                    step="any"
-                                    min={min}
-                                    max={max}
-                                    value={coordInputs[key]}
-                                    onChange={(e) =>
-                                        setCoordInputs((inputs) => ({
-                                            ...inputs,
-                                            [key]: e.target.value,
-                                        }))
-                                    }
-                                />
-                            </label>
-                        ))}
-                        <button type="submit">Apply coordinates</button>
-                        {coordError && (
-                            <div className="coord-error">{coordError}</div>
+                    <div className="fields-panel">
+                        <div className="sidebar-header">
+                            <span>Fields ({selectedFields.length})</span>
+                            {selectedFields.length > 0 && (
+                                <span className="fields-actions">
+                                    <button
+                                        type="button"
+                                        className={`panel-toggle${showNdvi ? " active" : ""}`}
+                                        title="Send the selected field rings to /api/fields/ndvi"
+                                        onClick={() => setShowNdvi((s) => !s)}
+                                    >
+                                        NDVI debug
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="panel-toggle"
+                                        onClick={() =>
+                                            onSelectedFieldsChange([])
+                                        }
+                                    >
+                                        Clear
+                                    </button>
+                                </span>
+                            )}
+                        </div>
+                        <label className="organic-toggle">
+                            <input
+                                type="checkbox"
+                                checked={showOrganic}
+                                onChange={(e) =>
+                                    setShowOrganic(e.target.checked)
+                                }
+                            />
+                            <span className="organic-swatch" />
+                            Highlight organic fields
+                        </label>
+                        {zoom < FIELD_TILES_MIN_ZOOM ? (
+                            <div className="fields-hint">
+                                Zoom in to see fields
+                            </div>
+                        ) : (
+                            selectedFields.length === 0 && (
+                                <div className="fields-hint">
+                                    Click a field to select it
+                                </div>
+                            )
                         )}
-                    </form>
+                        {fieldError && (
+                            <div className="coord-error">{fieldError}</div>
+                        )}
+                        {selectedFields.length > 0 && (
+                            <ul className="fields-list">
+                                {selectedFields.map((field) => (
+                                    <li key={field.id}>
+                                        <button
+                                            type="button"
+                                            className="field-name"
+                                            title={fieldLabel(field)}
+                                            onClick={() =>
+                                                mapRef.current?.fitBounds(
+                                                    fieldBounds(field),
+                                                    {
+                                                        padding: 80,
+                                                        maxZoom: 16,
+                                                    },
+                                                )
+                                            }
+                                        >
+                                            {fieldLabel(field)}
+                                        </button>
+                                        <span className="field-area">
+                                            {field.properties.area_ha.toFixed(
+                                                2,
+                                            )}{" "}
+                                            ha
+                                        </span>
+                                        <button
+                                            type="button"
+                                            className="field-remove"
+                                            aria-label="Remove field"
+                                            onClick={() =>
+                                                onSelectedFieldsChange(
+                                                    selectedFields.filter(
+                                                        (f) =>
+                                                            f.id !== field.id,
+                                                    ),
+                                                )
+                                            }
+                                        >
+                                            ×
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </div>
+                    <div className="soil-panel">
+                        <div className="sidebar-header">
+                            <span>Soil types</span>
+                        </div>
+                        <div className="fields-hint">
+                            Most probable WRB soil group, 250 m cells (ISRIC
+                            SoilGrids). Right-click the map for details.
+                        </div>
+                        <label className="soil-opacity">
+                            Opacity {Math.round(soilOpacity * 100)}%
+                            <input
+                                type="range"
+                                min={0}
+                                max={1}
+                                step={0.05}
+                                value={soilOpacity}
+                                onChange={(e) =>
+                                    setSoilOpacity(Number(e.target.value))
+                                }
+                            />
+                        </label>
+                        <details className="soil-legend">
+                            <summary>Legend</summary>
+                            <img
+                                src={SOIL_LEGEND_URL}
+                                alt="Soil group legend"
+                            />
+                        </details>
+                    </div>
                 </div>
             ) : (
                 <button
@@ -430,12 +826,22 @@ function Map({
                         Clear selection
                     </button>
                 )}
-                {bounds && !isSelecting && (
+                {(bounds || selectedFields.length > 0) && !isSelecting && (
                     <button className="primary" onClick={onConfirm}>
                         Select crops →
                     </button>
                 )}
             </div>
+            {selectedFields.length > 0 && (
+                <SentinelPanel fields={selectedFields} />
+            )}
+            {showNdvi && selectedFields.length > 0 && (
+                <NdviDebug
+                    fields={selectedFields}
+                    fieldLabel={fieldLabel}
+                    onClose={() => setShowNdvi(false)}
+                />
+            )}
             <div id="map-container" ref={mapContainerRef} />
         </div>
     )

@@ -11,6 +11,8 @@ import time
 
 import httpx
 
+from app.timing import emit, timed
+
 DEPLOYMENTS = {
     "cdse": {
         "token_url": "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token",
@@ -23,6 +25,10 @@ DEPLOYMENTS = {
 }
 
 WGS84 = "http://www.opengis.net/def/crs/EPSG/0/4326"
+
+# cap on simultaneous requests across all threads (plots x years); above this
+# Copernicus starts answering 429 Too Many Requests
+MAX_CONCURRENT_REQUESTS = 10
 
 # ---------------------------------------------------------------- evalscripts
 
@@ -62,7 +68,24 @@ function evaluatePixel(s) {
   return { ndvi: [ndvi], dataMask: [s.dataMask && !cloudy ? 1 : 0] };
 }"""
 
-EVALSCRIPTS = {"truecolor": EVAL_TRUECOLOR, "ndvi": EVAL_NDVI}
+# NDVI as a coloured RGBA image for display; clouds, shadows and snow are transparent.
+# Keep the stops in sync with NDVI_LEGEND in the frontend's SentinelPanel.
+EVAL_NDVI_COLOR = """//VERSION=3
+function setup() {
+  return { input: ["B04","B08","SCL","dataMask"], output: { bands: 4 } };
+}
+const stops = [-0.2, 0, 0.2, 0.4, 0.6, 0.8];
+const colors = [
+  [0.65, 0.0, 0.15], [0.84, 0.19, 0.15], [0.99, 0.68, 0.38],
+  [0.85, 0.94, 0.55], [0.40, 0.74, 0.39], [0.0, 0.41, 0.22]
+];
+function evaluatePixel(s) {
+  if (s.dataMask == 0 || [3,8,9,10,11].includes(s.SCL)) return [0, 0, 0, 0];
+  const ndvi = (s.B08 - s.B04) / (s.B08 + s.B04);
+  return [...colorBlend(ndvi, stops, colors), 1];
+}"""
+
+EVALSCRIPTS = {"truecolor": EVAL_TRUECOLOR, "ndvi": EVAL_NDVI, "ndvi-color": EVAL_NDVI_COLOR}
 
 
 class SentinelHubError(RuntimeError):
@@ -86,6 +109,7 @@ class SentinelHub:
         self._token: str | None = None
         self._expires = 0.0
         self._lock = threading.Lock()
+        self._slots = threading.BoundedSemaphore(MAX_CONCURRENT_REQUESTS)
 
     def close(self) -> None:
         self.http.close()
@@ -94,6 +118,7 @@ class SentinelHub:
     def token(self) -> str:
         with self._lock:
             if self._token is None or time.time() > self._expires - 60:
+                start = time.perf_counter()
                 r = self.http.post(
                     self.token_url,
                     data={
@@ -111,6 +136,7 @@ class SentinelHub:
                 j = r.json()
                 self._token = j["access_token"]
                 self._expires = time.time() + j.get("expires_in", 600)
+                emit("sh token refresh", (time.perf_counter() - start) * 1000)
             return self._token
 
     def _post(self, path: str, payload: dict, accept: str | None = None) -> httpx.Response:
@@ -118,8 +144,12 @@ class SentinelHub:
             headers = {"Authorization": f"Bearer {self.token()}"}
             if accept:
                 headers["Accept"] = accept
-            r = self.http.post(self.base + path, json=payload, headers=headers)
+            with self._slots, timed(f"sh POST {path}") as info:
+                r = self.http.post(self.base + path, json=payload, headers=headers)
+                info.update(status=r.status_code, kb=len(r.content) // 1024,
+                            attempt=attempt + 1 if attempt else None)
             if r.status_code == 429:  # rate limited -> back off
+                emit("sh rate limited, sleeping", 2**attempt * 1000)
                 time.sleep(2**attempt)
                 continue
             if r.status_code == 401 and attempt == 0:  # token expired -> refresh once
@@ -203,13 +233,17 @@ class SentinelHub:
         t_to,
         evalscript,
         interval="P10D",
-        res_deg=0.0001,
+        res_deg: float | tuple[float, float] = 0.0001,
         collection="sentinel-2-l2a",
         max_cloud=100,
+        geometry: dict | None = None,
     ) -> dict:
+        """With `geometry` (GeoJSON polygon, lon/lat) only pixels inside it count."""
+        resx, resy = res_deg if isinstance(res_deg, tuple) else (res_deg, res_deg)
+        bounds = {"geometry": geometry} if geometry else {"bbox": bbox}
         payload = {
             "input": {
-                "bounds": {"bbox": bbox, "properties": {"crs": WGS84}},
+                "bounds": {**bounds, "properties": {"crs": WGS84}},
                 "data": [
                     {"type": collection, "dataFilter": {"maxCloudCoverage": max_cloud}}
                 ],
@@ -218,8 +252,8 @@ class SentinelHub:
                 "timeRange": {"from": f"{t_from}T00:00:00Z", "to": f"{t_to}T23:59:59Z"},
                 "aggregationInterval": {"of": interval},
                 "evalscript": evalscript,
-                "resx": res_deg,  # ~10 m at mid-latitudes
-                "resy": res_deg,
+                "resx": resx,  # degrees; ~10 m pixels for field work
+                "resy": resy,
             },
             "calculations": {"default": {}},
         }

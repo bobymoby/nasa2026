@@ -20,5 +20,11 @@ class Settings(BaseSettings):
     )
     sh_deployment: Literal["cdse", "sh"] = "cdse"
 
+    # app.* log level; DEBUG shows per-request timings (see app/timing.py)
+    log_level: str = "DEBUG"
+
+    # PostGIS database from the repo-root docker-compose.yml
+    database_url: str = "postgresql://nasa:nasa@localhost:5432/nasa"
+
 
 settings = Settings()

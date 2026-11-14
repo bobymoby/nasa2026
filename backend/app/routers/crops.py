@@ -27,6 +27,16 @@ class Bounds(CamelModel):
         return self
 
 
+class SelectedField(CamelModel):
+    id: str
+    # outer ring of the field; may repeat the first point at the end
+    polygon: list[Point] = Field(min_length=3)
+
+
+class FieldsRequest(CamelModel):
+    fields: list[SelectedField] = Field(min_length=1, max_length=10_000)
+
+
 class Crop(CamelModel):
     id: str
     name: str
@@ -46,6 +56,21 @@ STUB_CROPS = [
 ]
 
 
-@router.post("/crops", response_model=CropsResponse, response_model_by_alias=True)
-def available_crops(bounds: Bounds) -> CropsResponse:
+@router.post(
+    "/crops/bounds",
+    response_model=CropsResponse,
+    response_model_by_alias=True,
+    summary="Crops available in a rectangle",
+)
+def crops_for_bounds(bounds: Bounds) -> CropsResponse:
+    return CropsResponse(crops=STUB_CROPS)
+
+
+@router.post(
+    "/crops/fields",
+    response_model=CropsResponse,
+    response_model_by_alias=True,
+    summary="Crops available on a set of selected fields",
+)
+def crops_for_fields(selection: FieldsRequest) -> CropsResponse:
     return CropsResponse(crops=STUB_CROPS)
