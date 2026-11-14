@@ -10,7 +10,11 @@ from typing import Annotated
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 
+from app.geo import RectQuery
 from app.cache import cached_json
+from app.routers.sentinel import Client, DateFrom, DateTo
+from app.services.sentinel_hub import SentinelHubError
+from app.services.soil import get_soil_characteristics
 
 router = APIRouter(prefix="/soil", tags=["soil"])
 
@@ -56,3 +60,21 @@ def soil_at_point(
         }
 
     return cached_json("soilgrids", {"lat": lat, "lng": lng, "classes": classes}, fetch)
+
+
+@router.get(
+    "/soil-characteristics",
+    summary="Field-scale Sentinel-2 L2A spectral indicators and historical series",
+)
+def soil_characteristics(
+    sh: Client,
+    rect: RectQuery,
+    t_from: DateFrom,
+    t_to: DateTo,
+):
+    try:
+        return get_soil_characteristics(sh, rect.bbox, t_from, t_to)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    except SentinelHubError as e:
+        raise HTTPException(502, str(e)) from e

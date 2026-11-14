@@ -14,7 +14,6 @@ from app.services.sentinel_hub import (
     SentinelHubError,
     summarize_ndvi_stats,
 )
-from app.services.soil import get_soil_characteristics
 
 router = APIRouter(prefix="/sentinel", tags=["sentinel"])
 
@@ -151,19 +150,3 @@ def stats(
     return rows
 
 
-@router.get(
-    "/soil-characteristics",
-    summary="Field-scale Sentinel-2 L2A spectral indicators and historical series",
-)
-def soil_characteristics(
-    sh: Client,
-    rect: RectQuery,
-    t_from: DateFrom,
-    t_to: DateTo,
-):
-    try:
-        return get_soil_characteristics(sh, rect.bbox, t_from, t_to)
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from e
-    except SentinelHubError as e:
-        raise _upstream(e) from e
