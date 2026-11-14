@@ -206,11 +206,14 @@ class SentinelHub:
         res_deg: float | tuple[float, float] = 0.0001,
         collection="sentinel-2-l2a",
         max_cloud=100,
+        geometry: dict | None = None,
     ) -> dict:
+        """With `geometry` (GeoJSON polygon, lon/lat) only pixels inside it count."""
         resx, resy = res_deg if isinstance(res_deg, tuple) else (res_deg, res_deg)
+        bounds = {"geometry": geometry} if geometry else {"bbox": bbox}
         payload = {
             "input": {
-                "bounds": {"bbox": bbox, "properties": {"crs": WGS84}},
+                "bounds": {**bounds, "properties": {"crs": WGS84}},
                 "data": [
                     {"type": collection, "dataFilter": {"maxCloudCoverage": max_cloud}}
                 ],
