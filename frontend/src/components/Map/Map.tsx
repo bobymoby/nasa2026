@@ -21,6 +21,7 @@ import {
     FIELD_TILES_URL,
     fetchField,
 } from "../../api/fetchField"
+import { prefetchFieldNdvi } from "../../api/fetchFieldNdvi"
 
 const INITIAL_VIEW_STATE = {
     lat: 43.429,
@@ -394,6 +395,8 @@ function Map({
                     const latest = selectedFieldsRef.current
                     if (latest.some((f) => f.id === field.id)) return
                     onSelectedFieldsChangeRef.current([...latest, field])
+                    // start the slow Sentinel-2 fetch now, not when NDVI is run
+                    prefetchFieldNdvi([field])
                 })
                 .catch((err) =>
                     setFieldError(

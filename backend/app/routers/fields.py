@@ -5,11 +5,16 @@ response, so the map loads them as Mapbox vector tiles and fetches the full
 record of a single field on click.
 """
 
+import contextvars
+import hashlib
+import json
+import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, Query, Response
+from fastapi import APIRouter, HTTPException, Path, Query, Response, status
 from psycopg.rows import dict_row
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
@@ -30,6 +35,7 @@ from app.services.field_ndvi import (
     shrink_polygon,
 )
 from app.services.sentinel_hub import SentinelHub, SentinelHubError
+from app.timing import emit, plot_tag, timed
 
 router = APIRouter(prefix="/fields", tags=["fields"])
 
@@ -105,11 +111,17 @@ def field_tile(
 # registered before /{field_id}, which would otherwise capture "ndvi"
 
 MAX_PLOTS = 50
+DEFAULT_FROM_YEAR = 2023
+
+log = logging.getLogger("app.fields")
+
+# background workers for /ndvi/prefetch; each plot fans out over its years
+_prefetch_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ndvi-prefetch")
 
 
 class NdviOptions(BaseModel):
-    from_year: int = Field(2017, ge=S2_FIRST_YEAR)
-    to_year: int = Field(2024, ge=S2_FIRST_YEAR)
+    from_year: int = Field(DEFAULT_FROM_YEAR, ge=S2_FIRST_YEAR)
+    to_year: int = Field(default_factory=lambda: date.today().year, ge=S2_FIRST_YEAR)
     buffer_m: float = Field(15, ge=0, le=200, description="Shrink the plot inwards by this many metres")
     min_valid: float = Field(0.7, gt=0, le=1, description="Drop dates with fewer clear plot pixels than this")
     bare_ndvi: float = Field(0.20, description="Smoothed NDVI below this = barren")
@@ -186,14 +198,41 @@ class PlotsRequest(NdviOptions):
         ]
 
 
-def _evaluate(sh: SentinelHub, inner: Rect | Polygon, years: list[int], opts: NdviOptions) -> dict:
+def _cache_key(kind: str, ident: str, buffer_m: float) -> str:
+    # the buffer changes which pixels are read, so it is part of the key
+    return f"{kind}:{ident}:b{buffer_m:g}"
+
+
+def _plot_key(plot_id: str | None, points: list[tuple[float, float]], buffer_m: float) -> str:
+    """Field id when given (stable across requests), else a hash of the outline."""
+    if plot_id is not None:
+        return _cache_key("field", plot_id, buffer_m)
+    rounded = [[round(lat, 7), round(lon, 7)] for lat, lon in points]
+    digest = hashlib.sha256(json.dumps(rounded).encode()).hexdigest()[:24]
+    return _cache_key("outline", digest, buffer_m)
+
+
+def _evaluate(
+    sh: SentinelHub, inner: Rect | Polygon, years: list[int], opts: NdviOptions, cache_key: str
+) -> dict:
     """One plot: the compact period list, or the full analysis with `detail`."""
+    start = time.perf_counter()
     try:
-        obs = fetch_observations(sh, inner, years)
+        with timed(f"fetch {len(years)} years") as fetch_info:
+            obs = fetch_observations(sh, inner, years, cache_key)
+            fetch_info["acquisitions"] = len(obs)
     except SentinelHubError as e:
         raise HTTPException(502, str(e))
+    fetched = time.perf_counter()
     params = opts.params()
-    result = analyse(obs, years, params)
+    with timed("analyse"):
+        result = analyse(obs, years, params)
+    done = time.perf_counter()
+    emit(
+        "plot done", (done - start) * 1000, logging.INFO,
+        fetch_ms=round((fetched - start) * 1000), analyse_ms=round((done - fetched) * 1000),
+        acquisitions=len(obs), kept=result["observations_kept"], periods=len(result["summary"]),
+    )
     observations, kept, daily = result.pop("observations"), result.pop("kept"), result.pop("daily")
     summary = result.pop("summary")
     if not opts.detail:
@@ -216,11 +255,14 @@ def _evaluate(sh: SentinelHub, inner: Rect | Polygon, years: list[int], opts: Nd
 )
 def field_ndvi(sh: Client, rect: RectQuery, opts: Annotated[NdviOptions, Query()]):
     years = opts.years()
+    plot_tag.set("rect")
     try:
         inner = shrink(rect, opts.buffer_m)
     except ValueError as e:
         raise HTTPException(422, str(e))
-    return _evaluate(sh, inner, years, opts)
+    key = _cache_key("rect", ",".join(f"{v:.7f}" for v in rect.bbox), opts.buffer_m)
+    with timed("GET /fields/ndvi", logging.INFO, years=f"{years[0]}-{years[-1]}"):
+        return _evaluate(sh, inner, years, opts, key)
 
 
 @router.post(
@@ -229,20 +271,56 @@ def field_ndvi(sh: Client, rect: RectQuery, opts: Annotated[NdviOptions, Query()
 )
 def plots_ndvi(sh: Client, req: PlotsRequest) -> list[dict]:
     years = req.years()
+    outlines = req.outlines()
+    received = time.perf_counter()
 
-    def one(item: tuple[str | None, list[tuple[float, float]]]) -> dict:
-        plot_id, points = item
+    def one(indexed: tuple[int, tuple[str | None, list[tuple[float, float]]]]) -> dict:
+        i, (plot_id, points) = indexed
+        plot_tag.set(f"plot {i}" + (f" {plot_id}" if plot_id is not None else ""))
+        # > 0 when there are more plots than workers and this one had to wait
+        emit("start", (time.perf_counter() - received) * 1000, waited="ms since request")
         head = {"id": plot_id} if plot_id is not None else {}
         try:
-            inner = shrink_polygon(plot_polygon(points), req.buffer_m)
-            return {**head, **_evaluate(sh, inner, years, req)}
+            with timed("outline + inward buffer", points=len(points)):
+                inner = shrink_polygon(plot_polygon(points), req.buffer_m)
+            key = _plot_key(plot_id, points, req.buffer_m)
+            return {**head, **_evaluate(sh, inner, years, req, key)}
         except ValueError as e:
             return {**head, "periods": [], "error": str(e)}
         except HTTPException as e:
             return {**head, "periods": [], "error": e.detail}
 
-    with ThreadPoolExecutor(max_workers=4) as pool_:
-        return list(pool_.map(one, req.outlines()))
+    with timed(
+        "POST /fields/ndvi", logging.INFO,
+        plots=len(outlines), years=f"{years[0]}-{years[-1]}", workers=4,
+    ):
+        with ThreadPoolExecutor(max_workers=4) as pool_:
+            return list(pool_.map(one, enumerate(outlines)))
+
+
+@router.post(
+    "/ndvi/prefetch",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Warm the NDVI cache for plots in the background; returns immediately",
+)
+def plots_ndvi_prefetch(sh: Client, req: PlotsRequest) -> dict:
+    """Same body as POST /ndvi. The frontend calls this when a field is picked,
+    so a later POST /ndvi finds the Copernicus data already cached (or joins
+    the fetch still in flight)."""
+    years = req.years()
+
+    def warm(plot_id: str | None, points: list[tuple[float, float]]) -> None:
+        plot_tag.set(f"prefetch {plot_id or 'outline'}")
+        try:
+            inner = shrink_polygon(plot_polygon(points), req.buffer_m)
+            with timed(f"prefetch {len(years)} years", logging.INFO):
+                fetch_observations(sh, inner, years, _plot_key(plot_id, points, req.buffer_m))
+        except Exception as e:  # nobody is waiting on this; just log it
+            log.warning("prefetch of %s failed: %s", plot_id or "outline", e)
+
+    for plot_id, points in req.outlines():
+        _prefetch_pool.submit(contextvars.copy_context().run, warm, plot_id, points)
+    return {"queued": len(req.outlines()), "years": [years[0], years[-1]]}
 
 
 @router.get("/{field_id}", summary="One field as a GeoJSON feature (WGS84)")

@@ -37,6 +37,34 @@ export function toSelectedField(field: Field): SelectedField {
     }
 }
 
+// default range; the backend uses the same when none is sent
+export const NDVI_DEFAULT_FROM_YEAR = 2023
+export const NDVI_DEFAULT_TO_YEAR = new Date().getFullYear()
+
+function ndviBody(fields: Field[], fromYear: number, toYear: number): string {
+    return JSON.stringify({
+        fields: fields.map(toSelectedField),
+        fromYear,
+        toYear,
+    })
+}
+
+// fire-and-forget: the backend starts fetching Sentinel-2 for these fields in
+// the background, so a later fetchFieldNdvi is served from its cache
+export function prefetchFieldNdvi(
+    fields: Field[],
+    fromYear = NDVI_DEFAULT_FROM_YEAR,
+    toYear = NDVI_DEFAULT_TO_YEAR,
+): void {
+    fetch(`${API_URL}/api/fields/ndvi/prefetch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: ndviBody(fields, fromYear, toYear),
+    }).catch(() => {
+        // best effort; the real request will fetch anyway
+    })
+}
+
 export async function fetchFieldNdvi(
     fields: Field[],
     fromYear: number,
@@ -46,11 +74,7 @@ export async function fetchFieldNdvi(
     const res = await fetch(`${API_URL}/api/fields/ndvi`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            fields: fields.map(toSelectedField),
-            fromYear,
-            toYear,
-        }),
+        body: ndviBody(fields, fromYear, toYear),
         signal,
     })
     if (!res.ok) {

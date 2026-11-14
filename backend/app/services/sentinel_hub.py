@@ -11,6 +11,8 @@ import time
 
 import httpx
 
+from app.timing import emit, timed
+
 DEPLOYMENTS = {
     "cdse": {
         "token_url": "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token",
@@ -23,6 +25,10 @@ DEPLOYMENTS = {
 }
 
 WGS84 = "http://www.opengis.net/def/crs/EPSG/0/4326"
+
+# cap on simultaneous requests across all threads (plots x years); above this
+# Copernicus starts answering 429 Too Many Requests
+MAX_CONCURRENT_REQUESTS = 10
 
 # ---------------------------------------------------------------- evalscripts
 
@@ -86,6 +92,7 @@ class SentinelHub:
         self._token: str | None = None
         self._expires = 0.0
         self._lock = threading.Lock()
+        self._slots = threading.BoundedSemaphore(MAX_CONCURRENT_REQUESTS)
 
     def close(self) -> None:
         self.http.close()
@@ -94,6 +101,7 @@ class SentinelHub:
     def token(self) -> str:
         with self._lock:
             if self._token is None or time.time() > self._expires - 60:
+                start = time.perf_counter()
                 r = self.http.post(
                     self.token_url,
                     data={
@@ -111,6 +119,7 @@ class SentinelHub:
                 j = r.json()
                 self._token = j["access_token"]
                 self._expires = time.time() + j.get("expires_in", 600)
+                emit("sh token refresh", (time.perf_counter() - start) * 1000)
             return self._token
 
     def _post(self, path: str, payload: dict, accept: str | None = None) -> httpx.Response:
@@ -118,8 +127,12 @@ class SentinelHub:
             headers = {"Authorization": f"Bearer {self.token()}"}
             if accept:
                 headers["Accept"] = accept
-            r = self.http.post(self.base + path, json=payload, headers=headers)
+            with self._slots, timed(f"sh POST {path}") as info:
+                r = self.http.post(self.base + path, json=payload, headers=headers)
+                info.update(status=r.status_code, kb=len(r.content) // 1024,
+                            attempt=attempt + 1 if attempt else None)
             if r.status_code == 429:  # rate limited -> back off
+                emit("sh rate limited, sleeping", 2**attempt * 1000)
                 time.sleep(2**attempt)
                 continue
             if r.status_code == 401 and attempt == 0:  # token expired -> refresh once

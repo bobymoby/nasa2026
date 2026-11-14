@@ -7,6 +7,9 @@ from fastapi.middleware.gzip import GZipMiddleware
 from app.config import settings
 from app.db import pool
 from app.routers import climate, crops, drought, fields, health, sentinel
+from app.timing import setup as setup_logging
+
+setup_logging(settings.log_level)
 
 
 @asynccontextmanager

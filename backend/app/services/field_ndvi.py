@@ -12,7 +12,9 @@
                 list of periods: crop / dormant_crop / bare / green_cover / uncertain
 """
 
+import contextvars
 import math
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
@@ -22,20 +24,26 @@ from shapely.geometry import Polygon, mapping
 from shapely.validation import make_valid
 from shapely.ops import transform
 
-from app.cache import cached_json
 from app.geo import Rect
+from app.services import ndvi_cache
 from app.services.sentinel_hub import SentinelHub
+from app.timing import timed
 
 S2_FIRST_YEAR = 2017  # Sentinel-2 L2A is complete over Europe from 2017
-EVALSCRIPT_VERSION = "field-v1"  # bump when the evalscript changes (cache key)
+# bump when the evalscript or request filters change (part of the cache key)
+EVALSCRIPT_VERSION = "field-v2-cc45"
+# skip whole Sentinel-2 tiles that are more than this % cloudy; Copernicus
+# never processes them (some clear-field dates in cloudy tiles are lost)
+MAX_TILE_CLOUD = 45
+# parallel Copernicus requests per plot (one per year)
+YEAR_WORKERS = 8
 
 EVAL_FIELD = """//VERSION=3
 function setup() {
   return {
-    input: [{ bands: ["B04", "B08", "B11", "SCL", "dataMask"] }],
+    input: [{ bands: ["B04", "B08", "SCL", "dataMask"] }],
     output: [
       { id: "ndvi", bands: 1, sampleType: "FLOAT32" },
-      { id: "b11", bands: 1, sampleType: "FLOAT32" },
       { id: "dataMask", bands: 1 }
     ]
   };
@@ -45,7 +53,7 @@ function evaluatePixel(s) {
   // saturated, dark, cloud shadow, water, unclassified, clouds, cirrus, snow
   const ok = s.dataMask == 1 && (s.SCL == 4 || s.SCL == 5);
   const ndvi = (s.B08 - s.B04) / (s.B08 + s.B04);
-  return { ndvi: [ndvi], b11: [s.B11], dataMask: [ok ? 1 : 0] };
+  return { ndvi: [ndvi], dataMask: [ok ? 1 : 0] };
 }"""
 
 M_PER_DEG_LAT = 110_574.0
@@ -176,11 +184,35 @@ def _stat(item: dict, output: str) -> dict:
     return item["outputs"][output]["bands"]["B0"]["stats"]
 
 
-def fetch_observations(sh: SentinelHub, area: Rect | Polygon, years: list[int]) -> list[dict]:
-    """Every acquisition in the years, unfiltered, with its clear-pixel share.
+def _parse_year(raw: dict) -> list[dict]:
+    """Statistical API response -> one row per acquisition (clear-share added later)."""
+    rows = []
+    for item in raw.get("data", []):
+        if "error" in item:
+            continue
+        st = _stat(item, "ndvi")
+        total = st.get("sampleCount", 0)
+        valid = total - st.get("noDataCount", 0)
+        if total == 0:
+            continue
+        rows.append({
+            "date": item["interval"]["from"][:10],
+            "ndvi": _round(st.get("mean")) if valid else None,
+            "ndvi_std": _round(st.get("stDev")) if valid else None,
+            "valid_px": valid,
+            "total_px": total,
+        })
+    return rows
+
+
+def fetch_observations(
+    sh: SentinelHub, area: Rect | Polygon, years: list[int], cache_key: str
+) -> list[dict]:
+    """Every acquisition in the years, with its clear-pixel share.
 
     A Rect is sent as a bbox; a polygon as its geometry, so only pixels inside
-    the outline count.
+    the outline count. Years are fetched in parallel and cached in Postgres
+    under `cache_key` (see ndvi_cache).
     """
     if isinstance(area, Rect):
         bbox, geometry, expected_px = area.bbox, None, None
@@ -192,35 +224,25 @@ def fetch_observations(sh: SentinelHub, area: Rect | Polygon, years: list[int]) 
         px_w, px_h = to_m(res[0], res[1])
         expected_px = area_m2(area) / (px_w * px_h)
     res = pixel_size(bbox)
-    rows = []
-    for year in years:
-        def fetch(year=year):
-            return sh.stats(
-                bbox, f"{year}-01-01", f"{year}-12-31", EVAL_FIELD,
-                interval="P1D", res_deg=res, geometry=geometry,
-            )
 
-        key = {"bbox": bbox, "year": year, "res": res, "v": EVALSCRIPT_VERSION}
-        if geometry:
-            key["geometry"] = [[round(x, 7), round(y, 7)] for x, y in area.exterior.coords]
-        raw = cached_json("s2_field", key, fetch) if year < date.today().year else fetch()
-        for item in raw.get("data", []):
-            if "error" in item:
-                continue
-            st = _stat(item, "ndvi")
-            total = st.get("sampleCount", 0)
-            valid = total - st.get("noDataCount", 0)
-            if total == 0:
-                continue
-            rows.append({
-                "date": item["interval"]["from"][:10],
-                "ndvi": _round(st.get("mean")) if valid else None,
-                "ndvi_std": _round(st.get("stDev")) if valid else None,
-                "b11": _round(_stat(item, "b11").get("mean")) if valid else None,
-                "valid_px": valid,
-                "total_px": total,
-                "valid_fraction": round(valid / total, 3),
-            })
+    def one_year(year: int) -> list[dict]:
+        def fetch() -> list[dict]:
+            raw = sh.stats(
+                bbox, f"{year}-01-01", f"{year}-12-31", EVAL_FIELD,
+                interval="P1D", res_deg=res, geometry=geometry, max_cloud=MAX_TILE_CLOUD,
+            )
+            return _parse_year(raw)
+
+        with timed(f"year {year}") as info:
+            rows = ndvi_cache.get_or_fetch(cache_key, year, EVALSCRIPT_VERSION, fetch)
+            info["acquisitions"] = len(rows)
+        return rows
+
+    # each worker gets its own copy of the context so log lines keep the plot tag
+    with ThreadPoolExecutor(max_workers=min(YEAR_WORKERS, len(years))) as ex:
+        futures = [ex.submit(contextvars.copy_context().run, one_year, y) for y in years]
+        rows = [dict(r) for f in futures for r in f.result()]
+
     if expected_px and rows:
         # pixels outside the outline are reported as no-data: measure the clear
         # share against the pixels inside it (area estimate, or the clearest
@@ -228,7 +250,8 @@ def fetch_observations(sh: SentinelHub, area: Rect | Polygon, years: list[int]) 
         inside = max(1, round(expected_px), max(r["valid_px"] for r in rows))
         for r in rows:
             r["total_px"] = min(r["total_px"], inside)
-            r["valid_fraction"] = round(r["valid_px"] / r["total_px"], 3)
+    for r in rows:
+        r["valid_fraction"] = round(r["valid_px"] / r["total_px"], 3)
     rows.sort(key=lambda r: r["date"])
     return rows
 
@@ -717,7 +740,9 @@ def plot_periods(segs: list[Segment], d: Daily, labels: list[str], p: Params) ->
 
 
 def analyse(obs: list[dict], years: list[int], p: Params) -> dict:
-    kept, d = clean(obs, p)
+    with timed("clean", acquisitions=len(obs)) as info:
+        kept, d = clean(obs, p)
+        info.update(kept=len(kept), days=len(d.dates) if d else 0)
     result = {
         "observations_total": len(obs),
         "observations_kept": len(kept),
@@ -729,15 +754,25 @@ def analyse(obs: list[dict], years: list[int], p: Params) -> dict:
             **result, "summary": [], "seasons": [], "periods": [], "bare_periods": [],
             "years": [], "daily": [],
         }
-    p = field_thresholds(d, p)
+    with timed("thresholds"):
+        p = field_thresholds(d, p)
     result["thresholds_used"] = {"bare_ndvi": p.bare_ndvi, "crop_ndvi": p.crop_ndvi}
-    segs, labels = label(d, p)
-    seas = seasons(segs, d, p)
-    pers = periods(d, labels)
+    with timed("label"):
+        segs, labels = label(d, p)
+    with timed("seasons"):
+        seas = seasons(segs, d, p)
+    with timed("periods"):
+        pers = periods(d, labels)
+    with timed("summary (plot_periods)"):
+        summary = plot_periods(segs, d, labels, p)
+    with timed("year_summary"):
+        years_out = year_summary(years, kept, d, labels, seas)
+    with timed("daily_rows"):
+        daily = daily_rows(d, labels)
     avg_peak = [s["peak_ndvi"] for s in seas if s["kind"] == "crop"]
     return {
         **result,
-        "summary": plot_periods(segs, d, labels, p),
+        "summary": summary,
         "average_crop_peak": round(sum(avg_peak) / len(avg_peak), 3) if avg_peak else None,
         "seasons": seas,
         "periods": pers,
@@ -745,6 +780,6 @@ def analyse(obs: list[dict], years: list[int], p: Params) -> dict:
             {"start": x["start"], "end": x["end"], "days": x["days"], "confidence": x["confidence"]}
             for x in pers if x["state"] == "bare"
         ],
-        "years": year_summary(years, kept, d, labels, seas),
-        "daily": daily_rows(d, labels),
+        "years": years_out,
+        "daily": daily,
     }

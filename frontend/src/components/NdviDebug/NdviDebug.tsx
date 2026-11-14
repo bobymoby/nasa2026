@@ -4,6 +4,8 @@ import { Field } from "../../api/fetchField"
 import {
     FieldNdvi,
     NdviPeriod,
+    NDVI_DEFAULT_FROM_YEAR,
+    NDVI_DEFAULT_TO_YEAR,
     PeriodType,
     fetchFieldNdvi,
 } from "../../api/fetchFieldNdvi"
@@ -109,8 +111,8 @@ function NdviDebug({
     fieldLabel: (field: Field) => string
     onClose: () => void
 }) {
-    const [fromYear, setFromYear] = useState(2017)
-    const [toYear, setToYear] = useState(Math.min(2024, THIS_YEAR))
+    const [fromYear, setFromYear] = useState(NDVI_DEFAULT_FROM_YEAR)
+    const [toYear, setToYear] = useState(NDVI_DEFAULT_TO_YEAR)
     const [loading, setLoading] = useState(false)
     const [elapsed, setElapsed] = useState(0)
     const [error, setError] = useState<string | null>(null)
@@ -228,8 +230,9 @@ function NdviDebug({
             {error && <div className="ndvi-error">{error}</div>}
             {!result && !error && !loading && (
                 <div className="ndvi-muted">
-                    Press Run. The first run per field fetches Sentinel-2 for
-                    every year and can take a while; repeats are cached.
+                    Press Run. Fields start loading in the background as soon
+                    as they are picked (default years), so this is often
+                    instant; other years are fetched on Run and then cached.
                 </div>
             )}
 
