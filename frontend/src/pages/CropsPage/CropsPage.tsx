@@ -2,8 +2,8 @@ import "./CropsPage.css"
 import { useEffect, useState } from "react"
 import { Link } from "react-router"
 
-import { Crop, fetchCrops } from "./api"
-import { Bounds } from "./point"
+import { Crop, fetchCrops } from "../../api/fetchCrops"
+import { Bounds } from "../../data/point"
 
 type Props = {
     bounds: Bounds

@@ -10,8 +10,8 @@ import mapboxgl, {
 
 import "mapbox-gl/dist/mapbox-gl.css"
 
-import LocationSearch, { SearchResult } from "./LocationSearch"
-import { Bounds, Point } from "./point"
+import LocationSearch, { SearchResult } from "../LocationSearch/LocationSearch"
+import { Bounds, Point } from "../../data/point"
 
 const INITIAL_VIEW_STATE = {
     lat: 43.429,
@@ -234,7 +234,8 @@ function Map({
 
     useEffect(() => {
         const source = mapRef.current?.getSource(SELECTION_SOURCE_ID) as
-            GeoJSONSource | undefined
+            | GeoJSONSource
+            | undefined
         source?.setData(selectionGeoJSON(bounds))
 
         // keep the inputs in sync with drawn/cleared selections
