@@ -84,10 +84,28 @@
     }
 }
 
+.crops-source {
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.crops-group {
+    margin-top: 20px;
+
+    h2 {
+        margin: 0 0 10px;
+        color: $page-muted;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+}
+
 .crops-list {
     list-style: none;
     padding: 0;
-    margin: 24px 0 16px;
+    margin: 0 0 8px;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 10px;
@@ -121,6 +139,7 @@
         }
 
         input {
+            flex: none;
             width: 16px;
             height: 16px;
             margin: 0;
@@ -129,7 +148,73 @@
     }
 }
 
+.crop-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.crop-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.crop-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.crop-class {
+    flex: none;
+    padding: 2px 8px;
+    border-radius: $radius-pill;
+    font-size: 11px;
+    font-weight: 600;
+
+    &.class-very_high,
+    &.class-high {
+        background-color: #d1fae5;
+        color: #065f46;
+    }
+
+    &.class-good {
+        background-color: #ecfccb;
+        color: #3f6212;
+    }
+
+    &.class-medium {
+        background-color: #fef3c7;
+        color: #92400e;
+    }
+}
+
+.crop-bar {
+    height: 4px;
+    border-radius: $radius-pill;
+    background-color: $page-border;
+    overflow: hidden;
+
+    span {
+        display: block;
+        height: 100%;
+        background-color: $accent;
+    }
+}
+
+.crop-meta {
+    color: $page-muted;
+    font-size: 12px;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+}
+
 .crops-count {
+    margin-top: 16px;
     font-size: 13px;
     font-weight: 500;
 }

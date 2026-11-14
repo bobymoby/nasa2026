@@ -36,6 +36,7 @@ Full parameter docs: http://localhost:8000/docs
 | `GET /api/fields/ndvi`                         | One rectangular plot: period timeline from Sentinel-2 NDVI (2017+) as `{periods: [{start, end, type, crop_type, confidence}]}`; type is barren / crop / dormant_crop / green_cover; `detail=true` returns the full analysis                                                                                                                                                        |
 | `POST /api/fields/ndvi`                        | Several plots. Either the frontend's picked fields, `{"fields": [{"id", "polygon": [{"lat", "lng"}, ...]}]}` (same shape as `/api/crops/fields`), or plain outlines, `{"plots": [[[lat, lon], ...], ...]}`; plus `fromYear`/`toYear` and the GET options (snake_case or camelCase). Returns one `{id?, periods}` body per plot in input order, with `error` for a plot that failed |
 | `POST /api/fields/ndvi/prefetch`               | Same body; starts fetching the plots' Sentinel-2 data in the background and returns 202 at once. The frontend calls it when a field is picked                                                                                                                                                                                                                                      |
+| `POST /api/fields/suitability`                 | Same plots as `POST /ndvi`, plus `inputLevel` (high / low), `minClass` (default medium) and `groups` (cereal, oilseed, ...). Returns per plot `{id?, cell, crops: [{crop, code, group, suitability 0–100, class, attainable_yield_kg_ha, yield_basis}]}`, best first, from FAO GAEZ v4 (rainfed, 1981–2010 climate, ~9 km cells)                                                   |
 | `GET /api/sentinel/search` / `image` / `stats` | Raw Sentinel Hub Catalog / Process / Statistical API; `image?type=ndvi-color` renders NDVI as a coloured PNG                                                                                                                                                                                                                                                                       |
 | `GET /api/soil/point?lat=&lng=`                | Most probable WRB soil groups at a point from ISRIC SoilGrids (250 m), cached in Postgres (`json_cache`)                                                                                                                                                                                                                                                                           |
 | `GET /api/soil/chemistry?top_left=&bottom_right=` | Sampled rectangle mean of SoilGrids pH in water, nitrogen and soil organic carbon by depth                                                                                                                                                                                                                                                                                     |
@@ -59,6 +60,12 @@ NDVI years default to 2023 to the current year. Sentinel-2 tiles more than 45% c
 Per-year field data is cached in Postgres (`ndvi_year_cache`, created on first use), keyed by field id
 (or an outline hash) plus the inward buffer: finished years are kept forever, the current year for a day.
 The years of one plot are fetched in parallel, with at most 10 Copernicus requests in flight at once.
+
+Crop suitability comes from FAO GAEZ v4's ArcGIS ImageServer (no key): one `identify` call per
+~9 km grid cell and input level returns all ~50 crops (~5–10 s). It is stored in plain tables,
+created on first use and keyed by GAEZ's own ids: `gaez_crop`, `gaez_layer` (GAEZ layer objectid),
+`gaez_cell`, `gaez_cell_fetch`, `gaez_cell_value` and `gaez_plot_cell` (field id or outline hash
+-> cell). GAEZ is static, so nothing expires.
 
 Sources: ERA5 via the Open-Meteo archive API (`models=era5`, no key), NASA POWER (no key),
 Sentinel-2 via Sentinel Hub (`SH_CLIENT_ID`, `SH_CLIENT_SECRET`, `SH_DEPLOYMENT` in the
