@@ -1,11 +1,14 @@
 import csv
 import io
+from datetime import date
 from functools import lru_cache
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.config import settings
+from app.geo import RectQuery
+from app.services.ndvi import S2_FIRST_YEAR, field_observations, year_metrics
 from app.services.sentinel_hub import (
     EVAL_NDVI_STATS,
     EVALSCRIPTS,
@@ -33,27 +36,6 @@ def get_client() -> SentinelHub:
 
 
 Client = Annotated[SentinelHub, Depends(get_client)]
-
-
-def parse_bbox(
-    bbox: Annotated[
-        str,
-        Query(
-            description="min_lon,min_lat,max_lon,max_lat (WGS84)",
-            examples=["23.2,42.6,23.4,42.75"],
-        ),
-    ],
-) -> list[float]:
-    try:
-        vals = [float(v) for v in bbox.split(",")]
-    except ValueError:
-        raise HTTPException(422, "bbox must be four comma-separated numbers")
-    if len(vals) != 4:
-        raise HTTPException(422, "bbox must be four comma-separated numbers")
-    return vals
-
-
-Bbox = Annotated[list[float], Depends(parse_bbox)]
 DateFrom = Annotated[str, Query(alias="from", description="YYYY-MM-DD")]
 DateTo = Annotated[str, Query(alias="to", description="YYYY-MM-DD")]
 Collection = Annotated[str, Query()]
@@ -67,7 +49,7 @@ def _upstream(e: SentinelHubError) -> HTTPException:
 @router.get("/search", summary="List available scenes (Catalog API)")
 def search(
     sh: Client,
-    bbox: Bbox,
+    rect: RectQuery,
     t_from: DateFrom,
     t_to: DateTo,
     collection: Collection = "sentinel-2-l2a",
@@ -76,7 +58,7 @@ def search(
     raw: bool = False,
 ):
     try:
-        feats = sh.search(bbox, t_from, t_to, collection, max_cloud, limit)
+        feats = sh.search(rect.bbox, t_from, t_to, collection, max_cloud, limit)
     except SentinelHubError as e:
         raise _upstream(e)
     if raw:
@@ -99,7 +81,7 @@ def search(
 )
 def image(
     sh: Client,
-    bbox: Bbox,
+    rect: RectQuery,
     t_from: DateFrom,
     t_to: DateTo,
     type: Literal["truecolor", "ndvi"] = "truecolor",
@@ -113,7 +95,7 @@ def image(
     fmt = IMAGE_FORMATS[format]
     try:
         data = sh.image(
-            bbox,
+            rect.bbox,
             t_from,
             t_to,
             EVALSCRIPTS[type],
@@ -131,7 +113,7 @@ def image(
 @router.get("/stats", summary="NDVI time series (Statistical API)")
 def stats(
     sh: Client,
-    bbox: Bbox,
+    rect: RectQuery,
     t_from: DateFrom,
     t_to: DateTo,
     interval: Annotated[
@@ -143,7 +125,7 @@ def stats(
 ):
     try:
         raw = sh.stats(
-            bbox,
+            rect.bbox,
             t_from,
             t_to,
             EVAL_NDVI_STATS,
@@ -165,3 +147,43 @@ def stats(
             headers={"Content-Disposition": 'attachment; filename="ndvi.csv"'},
         )
     return rows
+
+
+@router.get(
+    "/field-ndvi",
+    summary="Test 3: field greenness curve per year with peak, bare months and crop guess",
+)
+def field_ndvi(
+    sh: Client,
+    rect: RectQuery,
+    from_year: Annotated[int, Query(ge=S2_FIRST_YEAR)] = 2017,
+    to_year: Annotated[int, Query(ge=S2_FIRST_YEAR)] = 2024,
+    min_clear: Annotated[
+        float, Query(gt=0, le=1, description="Minimum cloud-free share of field pixels")
+    ] = 0.8,
+    bare_threshold: Annotated[float, Query(description="Monthly NDVI below this = bare")] = 0.2,
+):
+    if from_year > to_year or to_year > date.today().year:
+        raise HTTPException(422, "invalid year range")
+    years = []
+    try:
+        for y in range(from_year, to_year + 1):
+            obs = field_observations(sh, rect, y, min_clear)
+            years.append({"year": y, **year_metrics(obs, bare_threshold), "curve": obs})
+    except SentinelHubError as e:
+        raise _upstream(e)
+
+    peaks = [y["peak_value"] for y in years if y.get("peak_value") is not None]
+    avg_peak = round(sum(peaks) / len(peaks), 3) if peaks else None
+    for y in years:
+        if avg_peak and y.get("peak_value") is not None:
+            y["peak_vs_average"] = round(y["peak_value"] - avg_peak, 3)
+            y["peak_ratio"] = round(y["peak_value"] / avg_peak, 3)
+    return {
+        "rect": rect.as_dict(),
+        "average_peak": avg_peak,
+        "crop_sequence": [
+            {"year": y["year"], "crop_type_guess": y.get("crop_type_guess")} for y in years
+        ],
+        "years": years,
+    }
