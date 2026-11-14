@@ -1,0 +1,198 @@
+#root {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+}
+
+/* overlays (panel, buttons) are positioned relative to this */
+.map-root {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+}
+
+#map-container {
+    height: 100%;
+    width: 100%;
+    /* temporarily set the background color so we can tell where the map container is positioned */
+    background-color: lightgrey;
+}
+
+.sidebar {
+    background-color: rgb(35 55 75 / 90%);
+    color: #fff;
+    padding: 6px 12px;
+    font-family: monospace;
+    z-index: 1;
+    position: absolute;
+    top: 0;
+    left: 0;
+    margin: 12px;
+    border-radius: 4px;
+}
+
+.reset-button {
+    position: absolute;
+    top: 50px;
+    z-index: 1;
+    left: 12px;
+    padding: 4px 10px;
+    border-radius: 10px;
+    cursor: pointer;
+}
+
+.map-controls {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 1;
+    margin: 12px;
+    display: flex;
+    gap: 8px;
+}
+
+.map-controls button {
+    background-color: rgb(35 55 75 / 90%);
+    color: #fff;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-family: monospace;
+    cursor: pointer;
+}
+
+.map-controls button.active {
+    background-color: #3b82f6;
+}
+
+.coord-form {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 12px;
+    margin-top: 8px;
+}
+
+.coord-form label {
+    display: flex;
+    flex-direction: column;
+    font-size: 12px;
+    gap: 2px;
+}
+
+.coord-form input {
+    font-family: monospace;
+    padding: 3px 6px;
+    border-radius: 3px;
+    border: none;
+    width: 120px;
+}
+
+.coord-form button {
+    grid-column: 1 / -1;
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: none;
+    background-color: #3b82f6;
+    color: #fff;
+    font-family: monospace;
+    cursor: pointer;
+}
+
+.coord-error {
+    grid-column: 1 / -1;
+    color: #fca5a5;
+    font-size: 12px;
+}
+
+/* hide number input spinners */
+.coord-form input::-webkit-outer-spin-button,
+.coord-form input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.coord-form input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+
+.sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: bold;
+}
+
+.panel-toggle {
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid rgb(255 255 255 / 40%);
+    background: transparent;
+    color: #fff;
+    font-family: monospace;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+button.sidebar.panel-toggle {
+    background-color: rgb(35 55 75 / 90%);
+    padding: 6px 12px;
+}
+
+.location-search {
+    position: relative;
+    margin-top: 8px;
+}
+
+.location-search input {
+    box-sizing: border-box;
+    width: 100%;
+    font-family: monospace;
+    padding: 4px 6px;
+    border-radius: 3px;
+    border: none;
+}
+
+.location-search-results {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 2;
+    margin: 2px 0 0;
+    padding: 0;
+    list-style: none;
+    background-color: #fff;
+    color: #111;
+    border-radius: 3px;
+    box-shadow: 0 2px 6px rgb(0 0 0 / 30%);
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.location-search-results li {
+    padding: 5px 8px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.location-search-results li.highlighted {
+    background-color: #dbeafe;
+}
+
+.map-controls button.primary {
+    background-color: #16a34a;
+}
+
+.corner-handle {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background-color: #fff;
+    border: 3px solid #3b82f6;
+    box-shadow: 0 1px 4px rgb(0 0 0 / 40%);
+    cursor: move;
+}

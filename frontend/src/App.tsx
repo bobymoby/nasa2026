@@ -1,26 +1,59 @@
-import React from 'react';
-import logo from './logo.svg';
-import './App.css';
+import { useState } from "react"
+import {
+    BrowserRouter,
+    Navigate,
+    Route,
+    Routes,
+    useNavigate,
+} from "react-router"
+import "./App.css"
+import Map from "./Map"
+import CropsPage from "./CropsPage"
+import { Bounds } from "./point"
 
-function App() {
-  return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.tsx</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
-  );
+function AppRoutes() {
+    const [bounds, setBounds] = useState<Bounds | null>(null)
+    const [selectedCrops, setSelectedCrops] = useState<string[]>([])
+    const navigate = useNavigate()
+
+    return (
+        <Routes>
+            <Route
+                path="/"
+                element={
+                    <Map
+                        bounds={bounds}
+                        onBoundsChange={setBounds}
+                        onConfirm={() => navigate("/crops")}
+                    />
+                }
+            />
+            <Route
+                path="/crops"
+                element={
+                    bounds ? (
+                        <CropsPage
+                            bounds={bounds}
+                            selectedCrops={selectedCrops}
+                            onSelectedCropsChange={setSelectedCrops}
+                        />
+                    ) : (
+                        <Navigate to="/" replace />
+                    )
+                }
+            />
+        </Routes>
+    )
 }
 
-export default App;
+function App() {
+    return (
+        <div className="app">
+            <BrowserRouter>
+                <AppRoutes />
+            </BrowserRouter>
+        </div>
+    )
+}
+
+export default App

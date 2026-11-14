@@ -1,0 +1,38 @@
+.crops-page {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 24px 16px;
+    font-family: monospace;
+}
+
+.crops-back {
+    color: #3b82f6;
+    text-decoration: none;
+}
+
+.crops-area {
+    color: #555;
+    font-size: 13px;
+}
+
+.crops-error {
+    color: #b91c1c;
+}
+
+.crops-list {
+    list-style: none;
+    padding: 0;
+    margin: 16px 0;
+}
+
+.crops-list li label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    cursor: pointer;
+}
+
+.crops-count {
+    color: #555;
+}
