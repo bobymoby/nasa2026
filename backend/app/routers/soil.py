@@ -78,26 +78,18 @@ def _soilgrids_response(fetch: Callable[[], dict]) -> dict:
 
 @router.get(
     "/chemistry",
-    summary="Soil chemistry from SoilGrids at a point",
+    summary="Sampled SoilGrids chemistry over a rectangle",
 )
-def soil_chemistry(
-    lat: Annotated[float, Query(ge=-90, le=90)],
-    lng: Annotated[float, Query(ge=-180, le=180)],
-) -> dict:
-    lat, lng = round(lat, COORD_DECIMALS), round(lng, COORD_DECIMALS)
-    return _soilgrids_response(lambda: get_soil_chemistry(lat, lng))
+def soil_chemistry(rect: RectQuery) -> dict:
+    return _soilgrids_response(lambda: get_soil_chemistry(rect))
 
 
 @router.get(
     "/physical",
-    summary="Soil physical properties from SoilGrids at a point",
+    summary="Sampled SoilGrids physical properties over a rectangle",
 )
-def soil_physical(
-    lat: Annotated[float, Query(ge=-90, le=90)],
-    lng: Annotated[float, Query(ge=-180, le=180)],
-) -> dict:
-    lat, lng = round(lat, COORD_DECIMALS), round(lng, COORD_DECIMALS)
-    return _soilgrids_response(lambda: get_soil_physical(lat, lng))
+def soil_physical(rect: RectQuery) -> dict:
+    return _soilgrids_response(lambda: get_soil_physical(rect))
 
 
 @router.get(

@@ -23,8 +23,9 @@ fastapi dev app/main.py
 
 ## Data endpoints
 
-Every endpoint takes the area as two corners, `top_left=<lat>,<lon>` (north-west) and
-`bottom_right=<lat>,<lon>` (south-east). Full parameter docs: http://localhost:8000/docs
+Area endpoints take two corners, `top_left=<lat>,<lon>` (north-west) and
+`bottom_right=<lat>,<lon>` (south-east). Point endpoints take `lat` and `lng`.
+Full parameter docs: http://localhost:8000/docs
 
 | Endpoint                                       | What                                                                                                                                                                                                                                                                                                                                                                               |
 | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -37,13 +38,16 @@ Every endpoint takes the area as two corners, `top_left=<lat>,<lon>` (north-west
 | `POST /api/fields/ndvi/prefetch`               | Same body; starts fetching the plots' Sentinel-2 data in the background and returns 202 at once. The frontend calls it when a field is picked                                                                                                                                                                                                                                      |
 | `GET /api/sentinel/search` / `image` / `stats` | Raw Sentinel Hub Catalog / Process / Statistical API; `image?type=ndvi-color` renders NDVI as a coloured PNG                                                                                                                                                                                                                                                                       |
 | `GET /api/soil/point?lat=&lng=`                | Most probable WRB soil groups at a point from ISRIC SoilGrids (250 m), cached in Postgres (`json_cache`)                                                                                                                                                                                                                                                                           |
-| `GET /api/soil/chemistry?lat=&lng=`            | SoilGrids pH in water, nitrogen and soil organic carbon by depth                                                                                                                                                                                                                                                                                                                  |
-| `GET /api/soil/physical?lat=&lng=`             | SoilGrids clay, sand, silt and bulk density by depth, with the modeled depth intervals                                                                                                                                                                                                                                                                                             |
+| `GET /api/soil/chemistry?top_left=&bottom_right=` | Sampled rectangle mean of SoilGrids pH in water, nitrogen and soil organic carbon by depth                                                                                                                                                                                                                                                                                     |
+| `GET /api/soil/physical?top_left=&bottom_right=`  | Sampled rectangle mean of SoilGrids clay, sand, silt and bulk density by depth                                                                                                                                                                                                                                                                                                |
 | `GET /api/sentinel/soil-characteristics`       | Sentinel Hub Statistical API spectral indicators and historical series                                                                                                                                                                                                                                                                                                             |
 
-The SoilGrids chemistry and physical endpoints are point samples at the requested
-coordinates (not averages over a field boundary). Values use SoilGrids' supported
-depth layers from 0–5 cm through 100–200 cm, with the published scale factors applied.
+SoilGrids chemistry and physical endpoints use up to five evenly distributed points
+inside the requested rectangle and return the arithmetic mean of available point
+predictions at each depth. The sampled points and per-depth sample counts are included
+in the response; this is a sampled estimate, not a full raster average. Values use
+SoilGrids' supported depth layers from 0–5 cm through 100–200 cm, with published
+scale factors applied.
 SoilGrids does not provide phosphorus, potassium, or drainage. The available depth
 intervals describe the model profile rather than measured effective soil depth.
 
