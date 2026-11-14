@@ -203,10 +203,11 @@ class SentinelHub:
         t_to,
         evalscript,
         interval="P10D",
-        res_deg=0.0001,
+        res_deg: float | tuple[float, float] = 0.0001,
         collection="sentinel-2-l2a",
         max_cloud=100,
     ) -> dict:
+        resx, resy = res_deg if isinstance(res_deg, tuple) else (res_deg, res_deg)
         payload = {
             "input": {
                 "bounds": {"bbox": bbox, "properties": {"crs": WGS84}},
@@ -218,8 +219,8 @@ class SentinelHub:
                 "timeRange": {"from": f"{t_from}T00:00:00Z", "to": f"{t_to}T23:59:59Z"},
                 "aggregationInterval": {"of": interval},
                 "evalscript": evalscript,
-                "resx": res_deg,  # ~10 m at mid-latitudes
-                "resy": res_deg,
+                "resx": resx,  # degrees; ~10 m pixels for field work
+                "resy": resy,
             },
             "calculations": {"default": {}},
         }
