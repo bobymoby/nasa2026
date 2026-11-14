@@ -18,6 +18,9 @@ from datetime import date, timedelta
 
 import numpy as np
 from scipy.signal import savgol_filter
+from shapely.geometry import Polygon, mapping
+from shapely.validation import make_valid
+from shapely.ops import transform
 
 from app.cache import cached_json
 from app.geo import Rect
@@ -97,31 +100,109 @@ def shrink(rect: Rect, buffer_m: float) -> Rect:
     return inner
 
 
-def pixel_size(rect: Rect) -> tuple[float, float]:
+def pixel_size(bbox: list[float]) -> tuple[float, float]:
     """10 m pixels in degrees, coarsened if the area exceeds 2500 px a side."""
-    lat = math.radians(rect.center[0])
+    west, south, east, north = bbox
+    lat = math.radians((north + south) / 2)
     resx = 10 / (M_PER_DEG_LON_EQUATOR * math.cos(lat))
     resy = 10 / M_PER_DEG_LAT
-    scale = max(1.0, (rect.east - rect.west) / resx / 2500, (rect.north - rect.south) / resy / 2500)
+    scale = max(1.0, (east - west) / resx / 2500, (north - south) / resy / 2500)
     return resx * scale, resy * scale
+
+
+# -------- polygons (lon/lat shapely geometries)
+
+
+def _metric(lat0: float):
+    """Forward/back transforms between lon/lat and local metres around lat0."""
+    kx = M_PER_DEG_LON_EQUATOR * math.cos(math.radians(lat0))
+    to_m = lambda x, y: (x * kx, y * M_PER_DEG_LAT)  # noqa: E731
+    to_deg = lambda x, y: (x / kx, y / M_PER_DEG_LAT)  # noqa: E731
+    return to_m, to_deg
+
+
+def plot_polygon(points: list[tuple[float, float]]) -> Polygon:
+    """(lat, lon) outline -> lon/lat polygon.
+
+    The ring closes itself (a repeated first point, as in GeoJSON, is fine).
+    Slightly broken outlines (self-touching rings from reprojected parcels)
+    are repaired, keeping the largest piece.
+    """
+    for lat, lon in points:
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            raise ValueError(f"point ({lat}, {lon}) is out of range")
+    ring = [(lon, lat) for lat, lon in points]
+    if len(ring) > 1 and ring[0] == ring[-1]:
+        ring = ring[:-1]
+    if len(set(ring)) < 3:
+        raise ValueError("a plot needs at least 3 distinct points")
+    poly = Polygon(ring)
+    if not poly.is_valid:
+        poly = _largest(make_valid(poly))
+    if poly is None or poly.area == 0:
+        raise ValueError("the outline encloses no area")
+    return poly
+
+
+def _largest(geom) -> Polygon | None:
+    polys = [g for g in getattr(geom, "geoms", [geom]) if g.geom_type == "Polygon"]
+    polys += [p for g in getattr(geom, "geoms", []) if g.geom_type == "MultiPolygon" for p in g.geoms]
+    return max(polys, key=lambda g: g.area) if polys else None
+
+
+def shrink_polygon(poly: Polygon, buffer_m: float) -> Polygon:
+    """Move the outline inwards by buffer_m metres (keeps the largest piece).
+
+    Narrow plots that would vanish get a smaller buffer, down to none, rather
+    than failing: a strip field is still better than no answer.
+    """
+    to_m, to_deg = _metric(poly.centroid.y)
+    metric = transform(to_m, poly)
+    for b in (buffer_m, buffer_m / 2, buffer_m / 4, 0):
+        inner = metric.buffer(-b, join_style="mitre") if b else metric
+        inner = _largest(inner) if not inner.is_empty else None
+        # keep at least a few 10 m pixels inside
+        if inner is not None and inner.area >= 500:
+            return transform(to_deg, inner)
+    raise ValueError("plot is too small: under 500 m² (5 Sentinel-2 pixels)")
+
+
+def area_m2(poly: Polygon) -> float:
+    to_m, _ = _metric(poly.centroid.y)
+    return transform(to_m, poly).area
 
 
 def _stat(item: dict, output: str) -> dict:
     return item["outputs"][output]["bands"]["B0"]["stats"]
 
 
-def fetch_observations(sh: SentinelHub, rect: Rect, years: list[int]) -> list[dict]:
-    """Every acquisition in the years, unfiltered, with its clear-pixel share."""
-    res = pixel_size(rect)
+def fetch_observations(sh: SentinelHub, area: Rect | Polygon, years: list[int]) -> list[dict]:
+    """Every acquisition in the years, unfiltered, with its clear-pixel share.
+
+    A Rect is sent as a bbox; a polygon as its geometry, so only pixels inside
+    the outline count.
+    """
+    if isinstance(area, Rect):
+        bbox, geometry, expected_px = area.bbox, None, None
+    else:
+        bbox = list(area.bounds)
+        geometry = mapping(area)
+        res = pixel_size(bbox)
+        to_m, _ = _metric(area.centroid.y)
+        px_w, px_h = to_m(res[0], res[1])
+        expected_px = area_m2(area) / (px_w * px_h)
+    res = pixel_size(bbox)
     rows = []
     for year in years:
         def fetch(year=year):
             return sh.stats(
-                rect.bbox, f"{year}-01-01", f"{year}-12-31", EVAL_FIELD,
-                interval="P1D", res_deg=res,
+                bbox, f"{year}-01-01", f"{year}-12-31", EVAL_FIELD,
+                interval="P1D", res_deg=res, geometry=geometry,
             )
 
-        key = {"bbox": rect.bbox, "year": year, "res": res, "v": EVALSCRIPT_VERSION}
+        key = {"bbox": bbox, "year": year, "res": res, "v": EVALSCRIPT_VERSION}
+        if geometry:
+            key["geometry"] = [[round(x, 7), round(y, 7)] for x, y in area.exterior.coords]
         raw = cached_json("s2_field", key, fetch) if year < date.today().year else fetch()
         for item in raw.get("data", []):
             if "error" in item:
@@ -140,6 +221,14 @@ def fetch_observations(sh: SentinelHub, rect: Rect, years: list[int]) -> list[di
                 "total_px": total,
                 "valid_fraction": round(valid / total, 3),
             })
+    if expected_px and rows:
+        # pixels outside the outline are reported as no-data: measure the clear
+        # share against the pixels inside it (area estimate, or the clearest
+        # acquisition when edge pixels make that slightly larger)
+        inside = max(1, round(expected_px), max(r["valid_px"] for r in rows))
+        for r in rows:
+            r["total_px"] = min(r["total_px"], inside)
+            r["valid_fraction"] = round(r["valid_px"] / r["total_px"], 3)
     rows.sort(key=lambda r: r["date"])
     return rows
 
@@ -584,6 +673,49 @@ def daily_rows(d: Daily, labels: list[str]) -> list[dict]:
     ]
 
 
+PERIOD_TYPES = {
+    "bare": "barren",
+    "crop": "crop",
+    "dormant_crop": "dormant_crop",  # sown crop not showing up yet (winter)
+    "green_cover": "green_cover",  # weeds / cover crop, no cash crop
+    "uncertain": "uncertain",  # only when fill_gaps is off
+}
+
+CROP_TYPES = {
+    "winter crop": "winter",
+    "winter crop (sown, season continues)": "winter",
+    "summer crop": "summer",
+    "winter or early spring crop": "winter_or_spring",
+    "unclear": "unknown",
+}
+
+
+def plot_periods(segs: list[Segment], d: Daily, labels: list[str], p: Params) -> list[dict]:
+    """Compact timeline: start, end, type, crop type and confidence per period."""
+    crops = [s for s in segs if s.state == "crop" and s.kind == "crop"]
+    crop_type = {id(s): CROP_TYPES[_crop_type(s, d, _emergence(s, d, p))] for s in crops}
+
+    def season_of(i: int) -> Segment | None:
+        # the crop season holding day i; a gap-filled tail belongs to the one before
+        before = [s for s in crops if s.start <= i]
+        inside = [s for s in before if i <= s.end]
+        return (inside or before or [None])[-1]
+
+    out = []
+    for per in periods(d, labels):
+        kind = PERIOD_TYPES[per["state"]]
+        seg = season_of(d.dates.index(date.fromisoformat(per["start"]))) if kind in (
+            "crop", "dormant_crop") else None
+        out.append({
+            "start": per["start"],
+            "end": per["end"],
+            "type": kind,
+            "crop_type": crop_type[id(seg)] if seg else None,
+            "confidence": per["confidence"],
+        })
+    return out
+
+
 def analyse(obs: list[dict], years: list[int], p: Params) -> dict:
     kept, d = clean(obs, p)
     result = {
@@ -593,7 +725,10 @@ def analyse(obs: list[dict], years: list[int], p: Params) -> dict:
         "kept": kept,
     }
     if d is None:
-        return {**result, "seasons": [], "periods": [], "bare_periods": [], "years": [], "daily": []}
+        return {
+            **result, "summary": [], "seasons": [], "periods": [], "bare_periods": [],
+            "years": [], "daily": [],
+        }
     p = field_thresholds(d, p)
     result["thresholds_used"] = {"bare_ndvi": p.bare_ndvi, "crop_ndvi": p.crop_ndvi}
     segs, labels = label(d, p)
@@ -602,6 +737,7 @@ def analyse(obs: list[dict], years: list[int], p: Params) -> dict:
     avg_peak = [s["peak_ndvi"] for s in seas if s["kind"] == "crop"]
     return {
         **result,
+        "summary": plot_periods(segs, d, labels, p),
         "average_crop_peak": round(sum(avg_peak) / len(avg_peak), 3) if avg_peak else None,
         "seasons": seas,
         "periods": pers,

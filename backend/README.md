@@ -32,7 +32,8 @@ Every endpoint takes the area as two corners, `top_left=<lat>,<lon>` (north-west
 | `GET /api/climate/heat-frost` | Test 1: July heat, wheat-flowering heat and April frost days per year, ERA5 vs POWER |
 | `GET /api/drought` | Test 2: FAO-56 ET₀ + 150 mm bucket, seasonal shortfall and FAO-33 relative yield per crop/year |
 | `GET /api/drought/season` | Daily bucket trace (soil water, Ks, ETa) for one crop and harvest year |
-| `GET /api/fields/ndvi` | Field greenness: cleaned Sentinel-2 NDVI (2017+), crop seasons (emergence, peak, harvest, dormancy, double cropping), cover periods (crop / dormant_crop / bare / green_cover / uncertain) with confidence |
+| `GET /api/fields/ndvi` | One rectangular plot: period timeline from Sentinel-2 NDVI (2017+) as `{periods: [{start, end, type, crop_type, confidence}]}`; type is barren / crop / dormant_crop / green_cover; `detail=true` returns the full analysis |
+| `POST /api/fields/ndvi` | Several plots. Either the frontend's picked fields, `{"fields": [{"id", "polygon": [{"lat", "lng"}, ...]}]}` (same shape as `/api/crops/fields`), or plain outlines, `{"plots": [[[lat, lon], ...], ...]}`; plus `fromYear`/`toYear` and the GET options (snake_case or camelCase). Returns one `{id?, periods}` body per plot in input order, with `error` for a plot that failed |
 | `GET /api/sentinel/search` / `image` / `stats` | Raw Sentinel Hub Catalog / Process / Statistical API |
 
 Sources: ERA5 via the Open-Meteo archive API (`models=era5`, no key), NASA POWER (no key),
