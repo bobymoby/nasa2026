@@ -99,7 +99,6 @@ YIELD_UNITS = {
 }
 
 DDL = {
-    "gaez_legacy_cells": "DROP TABLE IF EXISTS gaez_plot_cell, gaez_cell_value, gaez_cell_fetch, gaez_cell",
     "gaez_crop": """
         CREATE TABLE IF NOT EXISTS gaez_crop (
             code       text PRIMARY KEY,
@@ -302,6 +301,8 @@ def catalog(level: str) -> list[Layer]:
 
 
 _memory: dict[tuple[str, Tile], TileValues] = {}
+_unsaved: set[tuple[str, tuple[int, int]]] = set()
+_persist_lock = threading.Lock()
 _inflight: dict[tuple[str, tuple[int, int]], Future] = {}
 _inflight_lock = threading.Lock()
 
@@ -367,7 +368,7 @@ def _fetch_region(level: str, region: tuple[int, int]) -> dict[Tile, TileValues]
     return tiles
 
 
-def _store_region(level: str, tiles: dict[Tile, TileValues]) -> None:
+def _store_region(level: str, tiles: dict[Tile, TileValues]) -> bool:
     try:
         _db_up()
         with timed("gaez region store", tiles=len(tiles)), \
@@ -397,8 +398,10 @@ def _store_region(level: str, tiles: dict[Tile, TileValues]) -> None:
                    ON CONFLICT (tile_id, input_level) DO UPDATE SET fetched_at = now()""",
                 [(tid, level) for tid in tile_ids],
             )
+        return True
     except Exception as e:
         _db_failed("region write", e)
+        return False
 
 
 def _load_region(level: str, region: tuple[int, int]) -> None:
@@ -415,7 +418,8 @@ def _load_region(level: str, region: tuple[int, int]) -> None:
         tiles = _fetch_region(level, region)
         for tile, values in tiles.items():
             _memory[(level, tile)] = values
-        _store_region(level, tiles)
+        if not _store_region(level, tiles):
+            _unsaved.add(ident)
         mine.set_result(None)
     except BaseException as e:
         mine.set_exception(e)
@@ -425,9 +429,26 @@ def _load_region(level: str, region: tuple[int, int]) -> None:
             _inflight.pop(ident, None)
 
 
+def _persist(level: str, region: tuple[int, int]) -> None:
+    """Writes a region fetched while the DB was down, once the DB answers again."""
+    if not _persist_lock.acquire(blocking=False):
+        return
+    try:
+        if (level, region) not in _unsaved or time.monotonic() < _db_down_until:
+            return
+        tiles = {t: v for (lvl, t), v in list(_memory.items()) if lvl == level and t.region == region}
+        if _store_region(level, tiles):
+            _unsaved.discard((level, region))
+            log.info("gaez region %s,%s saved after the DB came back", *region)
+    finally:
+        _persist_lock.release()
+
+
 def tile_values(level: str, tile: Tile) -> TileValues:
     key = (level, tile)
     if key in _memory:
+        if (level, tile.region) in _unsaved and time.monotonic() >= _db_down_until:
+            _prefetch_pool.submit(_persist, level, tile.region)
         return _memory[key]
     values = _read_tile(level, tile)
     if values is not None:
@@ -461,11 +482,14 @@ _prefetch_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="gaez-pref
 def prefetch(level: str, cells: set[Cell]) -> int:
     def warm(tile: Tile) -> None:
         try:
-            tile_values(level, tile)
+            with timed("gaez prefetch", logging.INFO, tile=f"{tile.row},{tile.col}", input_level=level):
+                tile_values(level, tile)
         except Exception as e:
             log.warning("gaez prefetch of tile %s,%s failed: %s", tile.row, tile.col, e)
 
-    missing = {c.tile for c in cells} - {t for lvl, t in _memory if lvl == level}
+    tiles = {c.tile for c in cells}
+    missing = tiles - {t for lvl, t in _memory if lvl == level}
+    emit("gaez prefetch queued", level=logging.INFO, tiles=len(missing), in_memory=len(tiles) - len(missing))
     for tile in missing:
         _prefetch_pool.submit(warm, tile)
     return len(missing)

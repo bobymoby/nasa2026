@@ -40,6 +40,7 @@ DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose up -d db
 
 - Settings live in `backend/app/config.py` (pydantic-settings). It reads the repo-root `.env`, then `backend/.env`; the later file wins.
 - `backend/.env` is git-ignored and holds `DATABASE_URL` (the shared team database).
+- Never drop tables or schemas from app code or scripts. When a table becomes obsolete, leave it in place and stop using it; deleting is a decision for the team.
 - The root `.env` holds Sentinel Hub credentials and is tracked in git. Never commit changes to it.
 - Sentinel Hub credentials are read from `DANNY_SH_CLIENT_ID` / `DANNY_SH_CLIENT_SECRET` through `validation_alias`. This is temporary.
 - The frontend reads `REACT_APP_API_URL` (default `http://localhost:8000`). Backend CORS allows only `http://localhost:3000` unless `CORS_ORIGINS` is set.
@@ -57,6 +58,7 @@ DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose up -d db
   - ISRIC SoilGrids: `routers/soil.py`, `services/soilgrids.py`.
   - FAO GAEZ v4 ImageServer: `services/gaez.py`.
   - FAO ECOCROP: `app/data/ecocrop.csv`, used by `services/crop_suitability.py`.
+  - Crop selling prices: `services/prices/` (`sources.py` fetch/parse, `store.py` tables, `pipeline.py` merge, deflate, summarize). Eurostat `apri_ap_crpouta` first, FAOSTAT bulk file as fallback. Crop codes are in `app/data/crop_price_codes.csv`, keyed by the same crop ids as the crops page (`wheat`, `dry_pea`, …); adding a country needs no code change.
 - **Caching. Everything is cached in Postgres; there are no file caches:**
   - `app/cache.py` provides `cached_json(namespace, key, fetch)`. It stores generic upstream responses in the `json_cache` table.
   - `services/ndvi_cache.py` stores per-year NDVI observations in `ndvi_year_cache`, keyed by field id or outline hash plus the inward buffer. Finished years are kept forever; the current year expires after 1 day. Concurrent fetches of the same plot and year are deduplicated.
