@@ -238,7 +238,7 @@ function Map({
     const showOrganicRef = useRef(showOrganic)
     showOrganicRef.current = showOrganic
     // the soil layer is always on; opacity 0 hides it and stops tile requests
-    const [soilOpacity, setSoilOpacity] = useState(0.7)
+    const [soilOpacity, setSoilOpacity] = useState(0.4)
     const soilOpacityRef = useRef(soilOpacity)
     soilOpacityRef.current = soilOpacity
     const [showNdvi, setShowNdvi] = useState(false)
