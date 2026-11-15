@@ -107,12 +107,21 @@ function StrategyDetail({ strategy }: { strategy: Strategy }) {
                 <h2>{strategy.name}</h2>
                 <p>{strategy.summary}</p>
                 <div className="strategy-tags">
-                    <span className="tag">{strategy.durationYears}-year plan</span>
-                    <span className="tag tag-money">
-                        {formatSigned(strategy.economics.profitPerHaYear)}/ha/yr profit
+                    <span className="tag">
+                        {strategy.durationYears}-year plan
                     </span>
-                    <RiskBadge level={strategy.erosionRisk.level} label="erosion risk" />
-                    <RiskBadge level={strategy.waterUse.level} label="water use" />
+                    <span className="tag tag-money">
+                        {formatSigned(strategy.economics.profitPerHaYear)}/ha/yr
+                        profit
+                    </span>
+                    <RiskBadge
+                        level={strategy.erosionRisk.level}
+                        label="erosion risk"
+                    />
+                    <RiskBadge
+                        level={strategy.waterUse.level}
+                        label="water use"
+                    />
                 </div>
             </header>
 
@@ -136,10 +145,20 @@ function StrategyDetail({ strategy }: { strategy: Strategy }) {
                 <h3>Assessment</h3>
                 <div className="rating-grid">
                     {RATINGS.map(({ key, label }) => (
-                        <RatingCard key={key} label={label} rating={strategy.ratings[key]} />
+                        <RatingCard
+                            key={key}
+                            label={label}
+                            rating={strategy.ratings[key]}
+                        />
                     ))}
-                    <AssessmentCard label="Erosion risk" assessment={strategy.erosionRisk} />
-                    <AssessmentCard label="Water use" assessment={strategy.waterUse} />
+                    <AssessmentCard
+                        label="Erosion risk"
+                        assessment={strategy.erosionRisk}
+                    />
+                    <AssessmentCard
+                        label="Water use"
+                        assessment={strategy.waterUse}
+                    />
                 </div>
             </section>
 
@@ -159,11 +178,16 @@ function StrategyDetail({ strategy }: { strategy: Strategy }) {
                         return (
                             <div className="role-card" key={key}>
                                 <div className="role-head">
-                                    <span className="role-icon" aria-hidden="true">
+                                    <span
+                                        className="role-icon"
+                                        aria-hidden="true"
+                                    >
                                         {icon}
                                     </span>
                                     <span className="role-name">{label}</span>
-                                    <span className={`importance importance-${role.level}`}>
+                                    <span
+                                        className={`importance importance-${role.level}`}
+                                    >
                                         {LEVEL_LABELS[role.level]} importance
                                     </span>
                                 </div>
@@ -214,7 +238,9 @@ function ComparisonTable({
                     {strategies.map((s) => (
                         <tr
                             key={s.id}
-                            className={s.id === selectedId ? "selected" : undefined}
+                            className={
+                                s.id === selectedId ? "selected" : undefined
+                            }
                             onClick={() => onSelect(s.id)}
                         >
                             <th scope="row">{s.name}</th>
@@ -227,13 +253,15 @@ function ComparisonTable({
                             {RATINGS.map(({ key }) => (
                                 <td key={key}>
                                     <span className="cell-score">
-                                        <ScoreMeter score={s.ratings[key].score} />
-                                        {s.ratings[key].score}
+                                        {s.ratings[key].score}/5
                                     </span>
                                 </td>
                             ))}
                             <td>
-                                <RiskBadge level={s.erosionRisk.level} label="" />
+                                <RiskBadge
+                                    level={s.erosionRisk.level}
+                                    label=""
+                                />
                             </td>
                             <td>
                                 <RiskBadge level={s.waterUse.level} label="" />
@@ -265,7 +293,9 @@ function StrategyPage({ selection, crops }: Props) {
             .catch((err) => {
                 if (controller.signal.aborted) return
                 setError(
-                    err instanceof Error ? err.message : "Failed to load strategies",
+                    err instanceof Error
+                        ? err.message
+                        : "Failed to load strategies",
                 )
             })
 
@@ -294,7 +324,9 @@ function StrategyPage({ selection, crops }: Props) {
             {error && (
                 <div className="strategy-error">
                     {error}
-                    <button onClick={() => setReloadKey((k) => k + 1)}>Retry</button>
+                    <button onClick={() => setReloadKey((k) => k + 1)}>
+                        Retry
+                    </button>
                 </div>
             )}
 

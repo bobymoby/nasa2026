@@ -708,7 +708,6 @@ $water-axis: 56px;
 
 .comparison {
     @include card;
-    overflow-x: auto;
 
     table {
         width: 100%;
@@ -718,15 +717,20 @@ $water-axis: 56px;
 
     th,
     td {
-        padding: 10px 14px;
+        padding: 8px 10px;
         text-align: left;
-        white-space: nowrap;
         border-bottom: 1px solid $page-border;
+    }
+
+    td {
+        white-space: nowrap;
     }
 
     thead th {
         @include eyebrow;
         font-size: 10px;
+        line-height: 1.3;
+        vertical-align: bottom;
         color: $page-muted;
         background-color: #fbfcfb;
     }
