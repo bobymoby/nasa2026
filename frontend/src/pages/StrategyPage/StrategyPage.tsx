@@ -2,10 +2,10 @@ import "./StrategyPage.scss"
 import { useEffect, useState } from "react"
 import { Link } from "react-router"
 
+import { fetchRotationRisks } from "../../api/fetchRotationRisks"
 import {
     Assessment,
     fetchStrategies,
-    Level,
     Rating,
     Strategy,
 } from "../../api/fetchStrategies"
@@ -14,6 +14,13 @@ import EconomicsSection, { formatSigned } from "./EconomicsSection"
 import RotationTimeline from "./RotationTimeline"
 import WaterChart from "./WaterChart"
 import { humanize, LEVEL_LABELS } from "./labels"
+import RiskBadge from "./RiskBadge"
+import {
+    plantingSequence,
+    RiskState,
+    RiskSummary,
+    RotationRisksSection,
+} from "./RotationRisks"
 
 type Props = {
     selection: AreaSelection
@@ -39,18 +46,6 @@ const CROP_ROLES: {
     { key: "deepRooting", label: "Deep-rooting crops", icon: "↓" },
     { key: "droughtTolerant", label: "Drought-tolerant crops", icon: "☀" },
 ]
-
-// low erosion or water use is good, so these read as status
-const RISK_ICONS: Record<Level, string> = { low: "✓", medium: "!", high: "▲" }
-
-function RiskBadge({ level, label }: { level: Level; label: string }) {
-    return (
-        <span className={`risk-badge risk-${level}`}>
-            <span aria-hidden="true">{RISK_ICONS[level]}</span>
-            {LEVEL_LABELS[level]} {label}
-        </span>
-    )
-}
 
 function ScoreMeter({ score }: { score: number }) {
     return (
@@ -100,7 +95,13 @@ function averageScore(s: Strategy): number {
     return scores.reduce((a, b) => a + b, 0) / scores.length
 }
 
-function StrategyDetail({ strategy }: { strategy: Strategy }) {
+function StrategyDetail({
+    strategy,
+    risk,
+}: {
+    strategy: Strategy
+    risk: RiskState | undefined
+}) {
     return (
         <article className="strategy-detail" key={strategy.id}>
             <header>
@@ -113,6 +114,7 @@ function StrategyDetail({ strategy }: { strategy: Strategy }) {
                     </span>
                     <RiskBadge level={strategy.erosionRisk.level} label="erosion risk" />
                     <RiskBadge level={strategy.waterUse.level} label="water use" />
+                    <RiskSummary state={risk} />
                 </div>
             </header>
 
@@ -122,6 +124,11 @@ function StrategyDetail({ strategy }: { strategy: Strategy }) {
                     plantings={strategy.plantings}
                     years={strategy.durationYears}
                 />
+            </section>
+
+            <section>
+                <h3>Rotation risks</h3>
+                <RotationRisksSection state={risk} plantings={strategy.plantings} />
             </section>
 
             <section>
@@ -188,10 +195,12 @@ function StrategyDetail({ strategy }: { strategy: Strategy }) {
 
 function ComparisonTable({
     strategies,
+    risks,
     selectedId,
     onSelect,
 }: {
     strategies: Strategy[]
+    risks: Record<string, RiskState>
     selectedId: string
     onSelect: (id: string) => void
 }) {
@@ -208,6 +217,7 @@ function ComparisonTable({
                         ))}
                         <th>Erosion risk</th>
                         <th>Water use</th>
+                        <th>Rotation risks</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -238,6 +248,9 @@ function ComparisonTable({
                             <td>
                                 <RiskBadge level={s.waterUse.level} label="" />
                             </td>
+                            <td>
+                                <RiskSummary state={risks[s.id]} />
+                            </td>
                         </tr>
                     ))}
                 </tbody>
@@ -251,6 +264,7 @@ function StrategyPage({ selection, crops }: Props) {
     const [error, setError] = useState<string | null>(null)
     const [reloadKey, setReloadKey] = useState(0)
     const [selectedId, setSelectedId] = useState<string | null>(null)
+    const [risks, setRisks] = useState<Record<string, RiskState>>({})
 
     useEffect(() => {
         const controller = new AbortController()
@@ -271,6 +285,47 @@ function StrategyPage({ selection, crops }: Props) {
 
         return () => controller.abort()
     }, [selection, crops, reloadKey])
+
+    // check every strategy's planting order once; strategies with the same
+    // order share one request
+    useEffect(() => {
+        if (!strategies) return
+        const controller = new AbortController()
+        const bySequence = new Map<string, string[]>()
+        for (const s of strategies) {
+            const key = plantingSequence(s.plantings).join(",")
+            bySequence.set(key, [...(bySequence.get(key) ?? []), s.id])
+        }
+        setRisks(
+            Object.fromEntries(
+                strategies.map((s) => [s.id, { status: "loading" } as RiskState]),
+            ),
+        )
+        bySequence.forEach((ids, key) => {
+            const settle = (state: RiskState) =>
+                setRisks((prev) => ({
+                    ...prev,
+                    ...Object.fromEntries(ids.map((id) => [id, state])),
+                }))
+            if (!key) {
+                settle({ status: "ok", issues: [] })
+                return
+            }
+            fetchRotationRisks(key.split(","), controller.signal)
+                .then((issues) => settle({ status: "ok", issues }))
+                .catch((err) => {
+                    if (controller.signal.aborted) return
+                    settle({
+                        status: "error",
+                        message:
+                            err instanceof Error
+                                ? err.message
+                                : "Failed to check rotation risks",
+                    })
+                })
+        })
+        return () => controller.abort()
+    }, [strategies])
 
     const selected = strategies?.find((s) => s.id === selectedId)
 
@@ -333,6 +388,9 @@ function StrategyPage({ selection, crops }: Props) {
                                     {formatSigned(s.economics.profitPerHaYear)}
                                     <small> /ha/yr est. profit</small>
                                 </span>
+                                <span className="option-risk">
+                                    <RiskSummary state={risks[s.id]} />
+                                </span>
                                 <span
                                     className={`option-match${s.matchedCrops.length ? "" : " none"}`}
                                 >
@@ -344,12 +402,15 @@ function StrategyPage({ selection, crops }: Props) {
                         ))}
                     </div>
 
-                    {selected && <StrategyDetail strategy={selected} />}
+                    {selected && (
+                        <StrategyDetail strategy={selected} risk={risks[selected.id]} />
+                    )}
 
                     <section className="comparison-section">
                         <h3>Compare all strategies</h3>
                         <ComparisonTable
                             strategies={strategies}
+                            risks={risks}
                             selectedId={selectedId ?? ""}
                             onSelect={setSelectedId}
                         />

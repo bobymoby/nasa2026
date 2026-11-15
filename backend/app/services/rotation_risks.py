@@ -79,13 +79,29 @@ CROPS: dict[str, Crop] = {
         Crop("potato", "Solanaceae", 2, 1, 4, 9, "spring", 1, 1, heavy_harvest=True),
         Crop("alfalfa", "Fabaceae", 3, 3, 4, 9, "perennial", 3, 3),
         Crop("clover", "Fabaceae", 2, 2, 4, 9, "perennial", 3, 3),
+        Crop("chickpea", "Fabaceae", 1, 2, 3, 7, "spring", 1, 1),
+        Crop("flax", "Linaceae", 2, 2, 3, 8, "spring", 1, 2),
+        Crop("buckwheat", "Polygonaceae", 2, 1, 5, 9, "spring", 1, 2),
+        Crop("carrot", "Apiaceae", 2, 1, 3, 9, "spring", 1, 1, heavy_harvest=True),
+        Crop("reed_canary_grass", "Poaceae", 2, 3, 4, 9, "perennial", 3, 3),
         Crop("fallow", None, 0, 0, 0, None, "fallow", 1, 1),
     )
+}
+
+# other ids used elsewhere in the app (strategies, crop_agronomy.csv) -> CROPS id
+ALIASES = {
+    "oat": "oats",
+    "field_pea": "pea",
+    "dry_pea": "pea",
+    "sugarbeet": "sugar_beet",
+    "white_potato": "potato",
+    "phaseolus_bean": "bean",
 }
 
 LABELS = {
     "maize_silage": "silage maize",
     "sugar_beet": "sugar beet",
+    "reed_canary_grass": "reed canary grass",
 }
 
 
@@ -271,7 +287,8 @@ def rotation_risks(crop_names: list[str]) -> list[dict]:
     """Medium and high environmental risks of planting these crops in this order.
 
     Args:
-        crop_names: one or more crop ids from CROPS, in planting order.
+        crop_names: one or more crop ids from CROPS (or ALIASES), in
+            planting order.
 
     Returns:
         One entry per issue ("drought", "heat", "waterlogging", "erosion",
@@ -283,10 +300,15 @@ def rotation_risks(crop_names: list[str]) -> list[dict]:
     """
     if not crop_names:
         raise ValueError("give at least one crop")
-    unknown = [n for n in crop_names if n.strip().lower() not in CROPS]
+    ids = [n.strip().lower() for n in crop_names]
+    ids = [ALIASES.get(i, i) for i in ids]
+    unknown = [n for n, i in zip(crop_names, ids) if i not in CROPS]
     if unknown:
-        raise ValueError(f"unknown crop(s) {unknown}; known: {sorted(CROPS)}")
-    crops = [CROPS[n.strip().lower()] for n in crop_names]
+        raise ValueError(
+            f"unknown crop(s) {unknown}; known: {sorted(CROPS)}, "
+            f"also accepted: {sorted(ALIASES)}"
+        )
+    crops = [CROPS[i] for i in ids]
 
     out = _Collector()
     for crop in dict.fromkeys(crops):  # each distinct crop once
