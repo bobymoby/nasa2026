@@ -1,0 +1,121 @@
+@use "../../styles/tokens" as *;
+@use "../../styles/mixins" as *;
+
+$row-height: 20px;
+
+// fixed size so it never scrolls and the right-hand panels can stop above it
+.soil-profile {
+    @include glass-panel;
+    position: absolute;
+    right: 0;
+    bottom: $soil-profile-bottom;
+    z-index: 1;
+    box-sizing: border-box;
+    margin: 0 $gap;
+    padding: 12px 14px;
+    width: $soil-profile-width;
+    max-width: calc(100% - #{$gap * 2});
+    height: $soil-profile-height;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    animation: panel-in 220ms $ease;
+}
+
+.soil-profile-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    line-height: 20px;
+
+    h2 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+    }
+
+    a {
+        color: $text-muted;
+        font-size: 11px;
+        text-decoration: none;
+
+        &:hover {
+            color: $text;
+        }
+    }
+}
+
+.soil-profile-status {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: $text-muted;
+}
+
+.soil-profile-error {
+    flex-direction: column;
+    gap: 8px;
+    color: $danger;
+    text-align: center;
+
+    button {
+        @include button(solid);
+    }
+}
+
+.soil-profile-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+
+    th,
+    td {
+        height: $row-height;
+        padding: 0 4px;
+        border-bottom: 1px solid $border;
+        text-align: right;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    th:first-child {
+        width: 28%;
+        text-align: left;
+    }
+
+    thead th {
+        padding: 0 2px;
+        color: $text-muted;
+        font-size: 11px;
+        font-weight: 500;
+    }
+
+    tbody th {
+        font-weight: 500;
+
+        span {
+            margin-left: 4px;
+            color: $text-faint;
+            font-weight: 400;
+        }
+    }
+
+    tbody tr:last-child > * {
+        border-bottom: none;
+    }
+}
+
+.soil-profile-note {
+    margin: auto 0 0;
+    color: $text-faint;
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

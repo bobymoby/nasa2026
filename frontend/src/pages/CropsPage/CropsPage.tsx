@@ -21,7 +21,6 @@ import { AreaSelection, describeSelection } from "../../data/point"
 import CropCard from "./CropCard"
 import ScoreInfo from "./ScoreInfo"
 import { ListedCrop, listCrops } from "./listedCrops"
-import SoilProfile from "./SoilProfile"
 import { useSmoothHorizontalScroll } from "./useSmoothHorizontalScroll"
 
 // smallest height a card fits in; keep in sync with the card styles
@@ -278,11 +277,6 @@ function CropsPage({
                 </span>
             </div>
 
-            <SoilProfile
-                selection={selection}
-                reloadKey={reloadKey}
-                onRetry={() => setReloadKey((key) => key + 1)}
-            />
             {!ready && !gaezError && (
                 <p className="crops-loading">
                     Checking which crops suit this area… a new area takes up to

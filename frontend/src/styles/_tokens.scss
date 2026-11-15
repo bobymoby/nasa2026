@@ -47,3 +47,9 @@ $blur: blur(14px) saturate(160%);
 $gap: 12px;
 $ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 $transition: 160ms $ease;
+
+// map soil profile panel (bottom right); the right-hand panels stop above it
+$soil-profile-width: 500px;
+$soil-profile-height: 244px;
+// clears the Mapbox attribution
+$soil-profile-bottom: 32px;
