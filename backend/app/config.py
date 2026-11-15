@@ -14,7 +14,9 @@ class Settings(BaseSettings):
     # Sentinel Hub OAuth client credentials
     # TEMPORARY: read Danny's credentials (DANNY_SH_*) instead of SH_*.
     # Remove the validation_alias arguments to go back to SH_CLIENT_ID/SECRET.
-    sh_client_id: str | None = Field(default=None, validation_alias="DANNY_SH_CLIENT_ID")
+    sh_client_id: str | None = Field(
+        default=None, validation_alias="DANNY_SH_CLIENT_ID"
+    )
     sh_client_secret: str | None = Field(
         default=None, validation_alias="DANNY_SH_CLIENT_SECRET"
     )
@@ -24,7 +26,7 @@ class Settings(BaseSettings):
     log_level: str = "DEBUG"
 
     # PostGIS database from the repo-root docker-compose.yml
-    database_url: str = "postgresql://nasa:nasa@10.232.178.179:5432/nasa"
+    database_url: str = "postgresql://nasa:nasa@10.205.147.179:5432/nasa"
 
 
 settings = Settings()
