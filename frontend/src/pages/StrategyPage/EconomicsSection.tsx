@@ -246,15 +246,15 @@ function EconomicsSection({
             </div>
 
             <p className="economics-note">
-                Revenue is {country}'s average yield times its average farm-gate
-                price over the last five years with data (Eurostat, FAOSTAT
-                where Eurostat has none)
+                Revenue uses {country}'s national five-year average yield and
+                farm-gate price (Eurostat, FAOSTAT where Eurostat has no data)
                 {economics.priceYear
                     ? `, with prices in ${economics.priceYear} euros`
                     : ""}
-                . Seed, other costs and cover crops are typical figures. Land
-                rent, subsidies, labour, overheads and tax are not included.
-                Money is counted in the year the crop is harvested.
+                . Seed, operating costs and cover-crop figures are estimates.
+                Land rent, subsidies, labour, overheads and tax are not
+                included. Money is
+                counted in the year the crop is harvested.
             </p>
         </div>
     )

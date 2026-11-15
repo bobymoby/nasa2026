@@ -38,6 +38,142 @@ BOUNDS = {
 
 
 class StrategiesEndpointTests(unittest.TestCase):
+    def test_service_context_changes_scores_and_economics(self):
+        context = {
+            "errors": [],
+            "plots": [
+                {
+                    "crops": {
+                        "catalog_crop_name": {
+                            "code": "whe",
+                            "suitability": 93.0,
+                            "yield_kg_ha": 6000,
+                        }
+                    },
+                    "site": {
+                        "soc_g_kg": 12.5,
+                        "sand_pct": 40.0,
+                        "clay_pct": 25.0,
+                        "awc_mm_per_m": 155.0,
+                    },
+                    "previous_season": {"type": "winter_crop"},
+                }
+            ],
+            "climate": {
+                "months": [
+                    {"month": month, "precip_mm": 50.0, "et0_mm": 40.0}
+                    for month in range(1, 13)
+                ]
+            },
+            "prices": {
+                "price_year": 2025,
+                "crops": {
+                    "wheat": {
+                        "reference_eur_t": 250.0,
+                        "confidence": "high",
+                        "variability_cv": 0.1,
+                    }
+                },
+            },
+        }
+        response = client.post(
+            "/api/strategies",
+            json={
+                "bounds": BOUNDS,
+                "crops": ["wheat"],
+                "siteContext": context,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["dataMode"], "mixed_service_and_mock")
+        strategy = body["strategies"][0]
+        self.assertEqual(strategy["evaluation"]["suitabilityScores"], [93.0] * 3)
+        self.assertAlmostEqual(strategy["evaluation"]["soilBenefitScore"], 35.29)
+        self.assertEqual(strategy["erosionRisk"]["level"], "unknown")
+        self.assertEqual(strategy["economics"]["priceYear"], 2025)
+        self.assertEqual(strategy["ratings"]["market"]["score"], 5)
+        self.assertIn("3 of 3 crop plantings", strategy["ratings"]["market"]["summary"])
+        self.assertTrue(
+            all(
+                "price eurostat 2020–2024" in planting["source"]
+                and "yield eurostat 2021–2025" in planting["source"]
+                for planting in strategy["economics"]["plantings"]
+            )
+        )
+        notes = " ".join(strategy["marketConsiderations"])
+        self.assertIn("ISRIC SoilGrids field context", notes)
+        self.assertIn("annual-normal precipitation 600 mm", notes)
+        self.assertIn("FAO GAEZ v4", notes)
+        self.assertIn("crop_agronomy.csv", notes)
+        self.assertIn("Seasonal crop water demand", notes)
+
+    def test_reference_price_coverage_is_not_reported_as_market_access(self):
+        response = client.post(
+            "/api/strategies",
+            json={
+                "bounds": BOUNDS,
+                "crops": ["wheat"],
+                "siteContext": {
+                    "prices": {
+                        "price_year": 2025,
+                        "crops": {
+                            "wheat": {
+                                "reference_eur_t": 250.0,
+                                "confidence": "high",
+                            }
+                        },
+                    }
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        strategy = response.json()["strategies"][0]
+        self.assertIn(
+            "does not measure buyer access",
+            strategy["ratings"]["market"]["summary"],
+        )
+        self.assertTrue(
+            all(
+                "yield eurostat 2021–2025" in planting["source"]
+                for planting in strategy["economics"]["plantings"]
+            )
+        )
+
+    def test_reference_market_yield_is_used_with_gaez_context(self):
+        response = client.post(
+            "/api/strategies",
+            json={
+                "bounds": BOUNDS,
+                "crops": ["wheat"],
+                "siteContext": {
+                    "plots": [
+                        {
+                            "crops": {
+                                "wheat": {
+                                    "code": "whe",
+                                    "suitability": 90.0,
+                                    "yield_kg_ha": 7000,
+                                }
+                            }
+                        }
+                    ]
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        economics = response.json()["strategies"][0]["economics"]
+        self.assertEqual(economics["priceYear"], 2025)
+        self.assertTrue(
+            all(
+                "yield eurostat 2021–2025" in planting["source"]
+                for planting in economics["plantings"]
+            )
+        )
+
     def test_first_four_use_all_selected_crops_and_balanced_may_add_one(self):
         selected = ["wheat", "barley", "sunflower", "chickpea", "field_pea"]
         response = client.post(
@@ -51,7 +187,17 @@ class StrategiesEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         plans = body["strategies"]
-        self.assertEqual(body["dataMode"], "illustrative_mock")
+        self.assertEqual(body["dataMode"], "mixed_service_and_mock")
+        self.assertEqual(plans[0]["economics"]["priceYear"], 2025)
+        self.assertEqual(plans[0]["ratings"]["market"]["score"], 5)
+        self.assertTrue(
+            all(
+                "price eurostat 2020–2024" in planting["source"]
+                and "yield eurostat 2021–2025" in planting["source"]
+                for planting in plans[0]["economics"]["plantings"]
+                if planting["role"] != "cover"
+            )
+        )
         self.assertGreater(body["rotationsEvaluated"], 0)
         self.assertEqual(len(plans), 5)
         self.assertEqual(len({tuple(plan["rotation"]) for plan in plans}), 5)
@@ -60,8 +206,14 @@ class StrategiesEndpointTests(unittest.TestCase):
             {plan["strategyType"] for plan in plans},
             {"profit_first", "soil_builder", "risk_balanced", "water_efficient", "balanced"},
         )
+        expected_years = max(3, len(selected), min(len(selected) + 1, 5))
+        self.assertTrue(
+            all(len(plan["rotation"]) == expected_years for plan in plans[:4])
+        )
+        self.assertGreater(
+            len({tuple(plan["rotation"]) for plan in plans[:4]}), 1
+        )
         for plan in plans[:4]:
-            self.assertEqual(len(plan["rotation"]), len(selected))
             self.assertEqual(set(plan["rotation"]), set(selected))
             self.assertTrue(plan["evaluation"]["feasible"])
             self.assertIn("profit_difference_eur_ha", plan["comparison"])
@@ -73,6 +225,26 @@ class StrategiesEndpointTests(unittest.TestCase):
             self.assertTrue(plan["explanations"])
         self.assertTrue(set(selected).issubset(plans[4]["rotation"]))
         self.assertGreater(len(plans[4]["rotation"]), len(selected))
+
+    def test_objectives_diversify_repeated_selected_crops(self):
+        selected = ["flax", "oat", "rye", "sorghum"]
+        response = client.post(
+            "/api/strategies",
+            json={"bounds": BOUNDS, "crops": selected},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        plans = response.json()["strategies"]
+        focused = plans[:4]
+        self.assertTrue(all(set(plan["rotation"]) == set(selected) for plan in focused))
+        self.assertTrue(all(len(plan["rotation"]) == 5 for plan in focused))
+        self.assertGreater(len({tuple(plan["rotation"]) for plan in focused}), 1)
+        self.assertGreater(
+            len({plan["evaluation"]["profitEurHa"] for plan in focused}), 1
+        )
+        self.assertGreater(
+            len({plan["evaluation"]["riskScore"] for plan in focused}), 1
+        )
 
     def test_needs_exactly_one_area(self):
         fields = [{"id": "a", "polygon": [{"lat": 1, "lng": 1}] * 3}]

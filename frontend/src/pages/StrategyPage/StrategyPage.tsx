@@ -8,6 +8,7 @@ import {
     fetchStrategies,
     Rating,
     Strategy,
+    StrategiesResult,
 } from "../../api/fetchStrategies"
 import { AreaSelection, describeSelection } from "../../data/point"
 import EconomicsSection, { formatSigned } from "./EconomicsSection"
@@ -33,7 +34,7 @@ const RATINGS: { key: keyof Strategy["ratings"]; label: string }[] = [
     { key: "pestDisruption", label: "Pest-cycle disruption" },
     { key: "soilImprovement", label: "Soil improvement" },
     { key: "foragePotential", label: "Forage potential" },
-    { key: "market", label: "Market" },
+    { key: "market", label: "Reference price coverage" },
 ]
 
 const CROP_ROLES: {
@@ -289,6 +290,9 @@ function ComparisonTable({
 
 function StrategyPage({ selection, crops }: Props) {
     const [strategies, setStrategies] = useState<Strategy[] | null>(null)
+    const [strategySources, setStrategySources] = useState<
+        Pick<StrategiesResult, "dataMode" | "assumptions"> | null
+    >(null)
     const [error, setError] = useState<string | null>(null)
     const [reloadKey, setReloadKey] = useState(0)
     const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -297,12 +301,17 @@ function StrategyPage({ selection, crops }: Props) {
     useEffect(() => {
         const controller = new AbortController()
         setStrategies(null)
+        setStrategySources(null)
         setError(null)
 
         fetchStrategies(selection, crops, controller.signal)
             .then((result) => {
-                setStrategies(result)
-                setSelectedId(result[0]?.id ?? null)
+                setStrategies(result.strategies)
+                setStrategySources({
+                    dataMode: result.dataMode,
+                    assumptions: result.assumptions,
+                })
+                setSelectedId(result.strategies[0]?.id ?? null)
             })
             .catch((err) => {
                 if (controller.signal.aborted) return
@@ -376,6 +385,21 @@ function StrategyPage({ selection, crops }: Props) {
                 ))}
             </div>
 
+            {strategySources && (
+                <details className="strategy-assumptions">
+                    <summary>
+                        {strategySources.dataMode !== "illustrative_mock"
+                            ? "Data sources and model assumptions"
+                            : "Illustrative model assumptions"}
+                    </summary>
+                    <ul>
+                        {strategySources.assumptions.map((assumption) => (
+                            <li key={assumption}>{assumption}</li>
+                        ))}
+                    </ul>
+                </details>
+            )}
+
             {error && (
                 <div className="strategy-error">
                     {error}
@@ -429,6 +453,8 @@ function StrategyPage({ selection, crops }: Props) {
                                     {s.matchedCrops.length
                                         ? `Uses ${s.matchedCrops.map(humanize).join(", ")}`
                                         : "Uses none of your crops"}
+                                    {" · "}
+                                    {s.rotation.map(humanize).join(" → ")}
                                 </span>
                             </button>
                         ))}

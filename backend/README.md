@@ -44,14 +44,34 @@ Full parameter docs: http://localhost:8000/docs
 | `GET /api/soil/point?lat=&lng=`                   | Most probable WRB soil groups at a point from ISRIC SoilGrids (250 m), cached in Postgres (`json_cache`)                                                                                                                                                                                                                                                                                                                                  |
 | `GET /api/soil/chemistry?top_left=&bottom_right=` | Sampled rectangle mean of SoilGrids pH in water, nitrogen and soil organic carbon by depth                                                                                                                                                                                                                                                                                                                                                |
 | `GET /api/soil/physical?top_left=&bottom_right=`  | Sampled rectangle mean of SoilGrids clay, sand, silt and bulk density by depth                                                                                                                                                                                                                                                                                                                                                            |
+| `POST /api/soil/selection`                       | Sampled ISRIC SoilGrids chemistry and physical properties for a rectangle or selected field polygons, by depth                                                                                                                                                                                                                                                                                                                         |
 | `GET /api/sentinel/soil-characteristics`          | Sentinel Hub Statistical API spectral indicators and historical series                                                                                                                                                                                                                                                                                                                                                                    |
-| `POST /api/strategies`                            | Multi-year crop rotation plans for `{"crops": [...], "bounds"\|"fields": ...}` (same area shapes as `/api/crops`), with five scoring profiles, timeline, ratings, and comparisons. The first four plans include every selected crop and use no unselected crops; the balanced plan includes every selected crop and may add another. Rotation length expands when needed. **Hard-coded mock data for now** (`app/services/strategies.py`) |
+| `POST /api/strategies`                        | Multi-year crop rotation plans for `{"crops": [...], "bounds"\|"fields": ...}` (same area shapes as `/api/crops`), with five scoring profiles, timeline, ratings, and comparisons. The first four plans include every selected crop and use no unselected crops; the balanced plan includes every selected crop and may add another. Rotation length expands when needed. Uses available FAO GAEZ suitability/yield, mapped crop-agronomy data, ERA5-based FAO-56 water-demand estimates, and country reference prices, plus SoilGrids/Sentinel context. The response includes `dataMode` and `assumptions`; the page exposes those assumptions. |
 
 Season compatibility, suitability, irrigation, and user crop selection are enforced
 when generating strategy candidates. Repeating crops or closely related crop families
 is allowed but lowers the modeled agronomic-feasibility score via a rotation-gap
 penalty. If no season-compatible candidate remains, the endpoint returns a 422 with
 guidance to select a compatible crop or enable irrigation.
+When three or four crops are selected, the first four objective-focused plans can
+extend by one year and repeat a selected crop, allowing profit-, soil-, risk-, and
+water-focused plans to differ while still using every selected crop and no
+unselected crops. The balanced plan may additionally introduce another crop.
+The strategy page fetches `/api/fields/strategy-context` and passes its result to the
+strategy endpoint. GAEZ suitability affects feasibility. Crop calendars, families,
+nitrogen fixation, rooting depth, drought tolerance, and humus balance use mapped
+entries from `app/data/crop_agronomy.csv` (FAO-56, FAO-33, and VDLUFA references are
+documented in `app/services/agronomy.py`); the strategy endpoint no longer reads the
+undocumented `crop_soil_scores` table. Seasonal crop-water demand uses FAO-56 crop
+coefficients with ERA5 monthly reference-ET normals when available. Eurostat/FAOSTAT
+reference prices and national yields are used where available; crops without
+published market figures or cost estimates are left out and flagged. GAEZ yields
+inform suitability, not the economics calculation. The reference-price coverage
+rating is not a measure of local buyer access. Seed and operating costs, generalized
+risk ratings, and unmapped crop profiles remain estimates. SoilGrids and Sentinel-2 seasonal
+context are included in the response's market considerations; where a validated
+crop-response model is not available, these remain context rather than being
+converted to unsupported thresholds.
 
 SoilGrids chemistry and physical endpoints use up to five evenly distributed points
 inside the requested rectangle and return the arithmetic mean of available point

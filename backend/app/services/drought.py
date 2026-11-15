@@ -11,6 +11,7 @@ Simplifications (deliberate, for the pipeline test):
     * fixed calendar dates for sowing, stages and harvest.
 """
 
+import calendar
 import math
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -173,6 +174,23 @@ def _kc(crop: Crop, season: int, d: date) -> float:
         if d <= d1:
             return k0 + (k1 - k0) * (d - d0).days / max((d1 - d0).days, 1)
     return pts[-1][1]
+
+
+def reference_crop_et_mm(
+    crop: Crop,
+    et0_monthly_mm: dict[int, float],
+    season: int = 2024,
+) -> float:
+    """Estimate seasonal ETc from monthly reference-ET normals and crop Kc."""
+    sow, harvest = crop.window(season)
+    total = 0.0
+    day = sow
+    while day <= harvest:
+        days_in_month = calendar.monthrange(day.year, day.month)[1]
+        daily_et0 = et0_monthly_mm[day.month] / days_in_month
+        total += _kc(crop, season, day) * daily_et0
+        day += timedelta(days=1)
+    return round(total, 1)
 
 
 # ---------------------------------------------------------------- bucket

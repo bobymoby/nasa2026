@@ -375,7 +375,11 @@ def _gaez(polys: list[Polygon]) -> list[dict]:
             out.append({})
             continue
         out.append({
-            _crop_id(c["crop"]): {"suitability": c["suitability"], "yield_kg_ha": c["attainable_yield_kg_ha"]}
+            _crop_id(c["crop"]): {
+                "code": c["code"],
+                "suitability": c["suitability"],
+                "yield_kg_ha": c["attainable_yield_kg_ha"],
+            }
             for c in gaez.crop_list("high", got, "not_suitable", None)
         })
     return out

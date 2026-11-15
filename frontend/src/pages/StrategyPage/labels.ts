@@ -22,6 +22,7 @@ export const LEVEL_LABELS: Record<Level, string> = {
     low: "Low",
     medium: "Medium",
     high: "High",
+    unknown: "Not assessed",
 }
 
 export function formatMonth({ year, month }: MonthRef): string {
