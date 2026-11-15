@@ -65,6 +65,14 @@ MOCK_CROPS: tuple[CropProfile, ...] = (
                 ("cover", "drought_tolerant"), note="Illustrative autumn-sown rye profile."),
     CropProfile("sorghum", "Sorghum", "cereal", 5, 9, 1600, 850, 50, 46, 390, 62,
                 ("drought_tolerant",), note="Illustrative warm-season sorghum profile."),
+    CropProfile("carrot", "Carrot", "vegetable", 3, 8, 2400, 1500, 52, 50, 430, 60,
+                note="Illustrative spring-sown carrot profile."),
+    CropProfile(
+        "reed_canary_grass", "Reed canary grass", "grass", 4, 8,
+        1350, 760, 76, 32, 360, 55,
+        ("cover", "deep_rooting"), role="forage",
+        note="Illustrative forage profile; perennial stand management is not modeled.",
+    ),
 )
 
 CROP_BY_ID = {crop.id: crop for crop in MOCK_CROPS}

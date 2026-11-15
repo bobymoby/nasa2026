@@ -111,6 +111,21 @@ class StrategiesEndpointTests(unittest.TestCase):
         )
         self.assertTrue(set(selected).issubset(plans[4]["rotation"]))
 
+    def test_supports_carrot_and_reed_canary_grass(self):
+        selected = ["carrot", "reed_canary_grass"]
+        response = client.post(
+            "/api/strategies",
+            json={"bounds": BOUNDS, "crops": selected},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        plans = response.json()["strategies"]
+        self.assertEqual(len(plans), 5)
+        self.assertTrue(
+            all(set(plan["rotation"]) == set(selected) for plan in plans[:4])
+        )
+        self.assertTrue(set(selected).issubset(plans[4]["rotation"]))
+
     def test_rejects_bad_suitability_and_conflicting_preferences(self):
         body = {
             "bounds": BOUNDS,
