@@ -1,23 +1,51 @@
 """Estimated cost and profit of a rotation strategy.
 
-Yield, price and seed cost of cash crops are 2026 Bulgarian market figures
-(from luben data/crop_economics_bg.csv). Everything else is a hard-coded
-estimate for Bulgarian conditions:
-- other operating costs (fertiliser, crop protection, machinery and fuel)
+Revenue of a harvested crop is the country's reference yield times its
+reference price (`prices.market_reference`: national 5-year means from
+Eurostat, FAOSTAT where Eurostat has none; prices in real euros of the price
+year).
+
+Costs are still hard-coded estimates for Bulgarian conditions, one entry per
+harvested crop and no catch-all default:
+- seed, and other operating costs (fertiliser, crop protection, machinery and fuel)
 - cover crops (seed + sowing and termination; no harvest)
-- alfalfa hay, which has no market figures
-Crops with neither fall back to the strategy generator's mock profile.
+
+A crop missing its market figures or its cost estimate is left out of the
+totals and marks the strategy incomplete; nothing is filled in by hand.
 
 Money is attributed to the harvest year; a forage ley is split per season.
 """
 
-import logging
 import math
 from dataclasses import dataclass
 
-from app.services.strategies import CROP_BY_ID
+from app.services.prices.pipeline import CropMarket, Market
 
-log = logging.getLogger(__name__)
+NO_MARKET_DATA = "no market data"
+NO_COST_DATA = "no cost estimate"
+
+# strategy crop id -> price table crop id
+MARKET_IDS = {"field_pea": "dry_pea"}
+
+# €/ha per season
+SEED_COSTS_EUR_HA = {
+    "wheat": 115.0,
+    "barley": 90.0,
+    "rye": 72.0,
+    "oat": 70.0,
+    "maize": 169.0,
+    "sorghum": 60.0,
+    "buckwheat": 60.0,
+    "sunflower": 72.0,
+    "rapeseed": 60.0,
+    "flax": 75.0,
+    "soybean": 143.0,
+    "chickpea": 132.0,
+    "field_pea": 150.0,
+    "alfalfa": 120.0,
+    "carrot": 700.0,
+    "reed_canary_grass": 90.0,
+}
 
 # €/ha per season, excluding seed
 OPERATING_COSTS_EUR_HA = {
@@ -28,10 +56,17 @@ OPERATING_COSTS_EUR_HA = {
     "rapeseed": 550.0,
     "soybean": 320.0,
     "chickpea": 290.0,
+    "field_pea": 330.0,
+    "oat": 380.0,
+    "rye": 380.0,
+    "sorghum": 420.0,
+    "buckwheat": 330.0,
+    "flax": 380.0,
     "alfalfa": 340.0,
+    "reed_canary_grass": 300.0,
+    # irrigation, hand weeding, harvest and washing
+    "carrot": 4800.0,
 }
-PRICE_ALIASES = {"field_pea": "pea"}
-DEFAULT_OPERATING_COST_EUR_HA = 450.0
 
 # cover crops: (seed, sowing + termination) in €/ha
 COVER_COSTS_EUR_HA = {
@@ -46,40 +81,16 @@ DEFAULT_COVER_COST_EUR_HA = (60.0, 60.0)
 
 
 @dataclass(frozen=True)
-class CropPrice:
-    yield_t_ha: float
-    price_eur_t: float
-    seed_cost_eur_ha: float
-    # yield year of the market figures; None = hard-coded estimate
-    year: int | None
-
-
-CROP_PRICES = {
-    "potato": CropPrice(16.44, 350.0, 1800.0, 2026),
-    "rapeseed": CropPrice(3.21, 479.0, 60.0, 2026),
-    "sunflower": CropPrice(2.59, 489.0, 72.0, 2026),
-    "wheat": CropPrice(6.33, 189.0, 115.0, 2026),
-    "barley": CropPrice(5.88, 178.0, 90.0, 2026),
-    "maize": CropPrice(5.65, 196.0, 169.0, 2026),
-    "soybean": CropPrice(2.2, 430.0, 143.0, 2026),
-    "chickpea": CropPrice(1.5, 600.0, 132.0, 2026),
-    "lentil": CropPrice(1.3, 600.0, 84.0, 2026),
-    "triticale": CropPrice(4.15, 170.0, 84.0, 2026),
-    "pea": CropPrice(2.5, 280.0, 150.0, 2026),
-    "rye": CropPrice(2.5, 165.0, 72.0, 2026),
-    # hay per harvest season; seed is paid once when the ley is sown
-    "alfalfa": CropPrice(7.0, 140.0, 120.0, None),
-}
-
-
-@dataclass(frozen=True)
 class PlantingEconomics:
+    crop_id: str
     crop_name: str
     role: str
     revenue: float
     seed_cost: float
     operating_cost: float
-    # where yield and price came from: "market <year>", "estimate" or "no harvest"
+    yield_t_ha: float | None
+    price_eur_t: float | None
+    # where yield and price came from, "no market data" or "no harvest"
     source: str
     # (rotation year, revenue, cost) slices of this planting
     by_year: list[tuple[int, float, float]]
@@ -88,11 +99,16 @@ class PlantingEconomics:
     def cost(self) -> float:
         return self.seed_cost + self.operating_cost
 
+    @property
+    def counted(self) -> bool:
+        return self.source not in (NO_MARKET_DATA, NO_COST_DATA)
+
 
 @dataclass(frozen=True)
 class StrategyEconomics:
     plantings: list[PlantingEconomics]
     years: int
+    country: str
     price_year: int | None
 
     @property
@@ -115,6 +131,14 @@ class StrategyEconomics:
     def profit(self) -> float:
         return self.revenue - self.total_cost
 
+    @property
+    def missing_data(self) -> list[str]:
+        return list(dict.fromkeys(p.crop_name for p in self.plantings if not p.counted))
+
+    @property
+    def complete(self) -> bool:
+        return not self.missing_data
+
     def by_year(self) -> list[tuple[float, float]]:
         """(revenue, cost) per rotation year."""
         totals = [[0.0, 0.0] for _ in range(self.years)]
@@ -125,75 +149,86 @@ class StrategyEconomics:
         return [(r, c) for r, c in totals]
 
 
-def _planting_economics(p: dict) -> PlantingEconomics:
+def market_id(crop_id: str) -> str:
+    return MARKET_IDS.get(crop_id, crop_id)
+
+
+def _years(span: tuple[int, int]) -> str:
+    return str(span[0]) if span[0] == span[1] else f"{span[0]}–{span[1]}"
+
+
+def _basis(m: CropMarket) -> str:
+    return (
+        f"price {m.price_source} {_years(m.price_years)}, "
+        f"yield {m.yield_source} {_years(m.yield_years)}"
+    )
+
+
+def _costs(crop_id: str) -> tuple[float, float] | None:
+    if crop_id not in SEED_COSTS_EUR_HA or crop_id not in OPERATING_COSTS_EUR_HA:
+        return None
+    return SEED_COSTS_EUR_HA[crop_id], OPERATING_COSTS_EUR_HA[crop_id]
+
+
+def _season(crop_id: str, market: Market) -> tuple[float | None, float | None, float, str]:
+    """(yield, price, revenue, basis) of one harvest season per ha."""
+    m = market.crops.get(market_id(crop_id))
+    if m is None:
+        return None, None, 0.0, NO_MARKET_DATA
+    if m.price_eur_t is None or m.yield_t_ha is None:
+        return m.yield_t_ha, m.price_eur_t, 0.0, NO_MARKET_DATA
+    return m.yield_t_ha, m.price_eur_t, m.yield_t_ha * m.price_eur_t, _basis(m)
+
+
+def crop_profit_eur_ha(crop_id: str, market: Market) -> float:
+    """Profit of one season of a harvested crop, as the economics below counts it."""
+    costs = _costs(crop_id)
+    _, _, revenue, basis = _season(crop_id, market)
+    if costs is None or basis == NO_MARKET_DATA:
+        return 0.0
+    return revenue - sum(costs)
+
+
+def _planting_economics(p: dict, market: Market) -> PlantingEconomics:
     crop_id, role, name = p["crop_id"], p["role"], p["crop_name"]
     start_year, end_year = p["start"]["year"], p["end"]["year"]
 
     if role == "cover":
         seed, ops = COVER_COSTS_EUR_HA.get(crop_id, DEFAULT_COVER_COST_EUR_HA)
         return PlantingEconomics(
-            name, role, 0.0, seed, ops, "no harvest", [(start_year, 0.0, seed + ops)]
+            crop_id, name, role, 0.0, seed, ops, None, None, "no harvest", [(start_year, 0.0, seed + ops)]
         )
 
-    price = CROP_PRICES.get(PRICE_ALIASES.get(crop_id, crop_id))
-    if price is None:
-        mock = CROP_BY_ID.get(crop_id)
-        if mock is None:
-            log.warning("no price for %s; counting costs only", crop_id)
-            ops = DEFAULT_OPERATING_COST_EUR_HA
-            return PlantingEconomics(
-                name, role, 0.0, 0.0, ops, "no price data", [(end_year, 0.0, ops)]
-            )
-        revenue, cost = mock.gross_revenue_eur_ha, mock.variable_cost_eur_ha
+    yield_t_ha, price, revenue, basis = _season(crop_id, market)
+    costs = _costs(crop_id)
+    if costs is None or basis == NO_MARKET_DATA:
         return PlantingEconomics(
-            name, role, revenue, 0.0, cost, "mock profile", [(end_year, revenue, cost)]
+            crop_id, name, role, 0.0, 0.0, 0.0, yield_t_ha, price,
+            NO_COST_DATA if costs is None else NO_MARKET_DATA, [(end_year, 0.0, 0.0)],
         )
-
-    ops_per_season = OPERATING_COSTS_EUR_HA.get(crop_id, DEFAULT_OPERATING_COST_EUR_HA)
-    source = f"market {price.year}" if price.year else "estimate"
-    revenue_per_season = price.yield_t_ha * price.price_eur_t
+    seed, ops = costs
 
     if role == "forage":
         seasons = list(range(start_year, end_year + 1))
-        by_year = [
-            (y, revenue_per_season, ops_per_season + (price.seed_cost_eur_ha if y == start_year else 0.0))
-            for y in seasons
-        ]
+        by_year = [(y, revenue, ops + (seed if y == start_year else 0.0)) for y in seasons]
         return PlantingEconomics(
-            name,
-            role,
-            revenue_per_season * len(seasons),
-            price.seed_cost_eur_ha,
-            ops_per_season * len(seasons),
-            source,
-            by_year,
+            crop_id, name, role, revenue * len(seasons), seed, ops * len(seasons),
+            yield_t_ha, price, basis, by_year,
         )
 
     return PlantingEconomics(
-        name,
-        role,
-        revenue_per_season,
-        price.seed_cost_eur_ha,
-        ops_per_season,
-        source,
-        [(end_year, revenue_per_season, price.seed_cost_eur_ha + ops_per_season)],
+        crop_id, name, role, revenue, seed, ops, yield_t_ha, price, basis,
+        [(end_year, revenue, seed + ops)],
     )
 
 
-def strategy_economics(plantings: list[dict], years: int) -> StrategyEconomics:
+def strategy_economics(plantings: list[dict], years: int, market: Market) -> StrategyEconomics:
     """Per-hectare economics of one pass through a generated rotation."""
-    priced = [_planting_economics(p) for p in plantings]
-    price_years = [
-        price.year
-        for p in plantings
-        if p["role"] != "cover"
-        and (price := CROP_PRICES.get(PRICE_ALIASES.get(p["crop_id"], p["crop_id"])))
-        and price.year
-    ]
     return StrategyEconomics(
-        plantings=priced,
+        plantings=[_planting_economics(p, market) for p in plantings],
         years=years,
-        price_year=max(price_years) if price_years else None,
+        country=market.country,
+        price_year=market.price_year,
     )
 
 

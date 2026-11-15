@@ -100,7 +100,7 @@ STRATEGY_PROFILES: dict[str, dict[str, float]] = {
     },
 }
 STRATEGY_NAMES = {
-    "profit_first": ("Profit-focused", "Prioritizes illustrative rotation gross margin."),
+    "profit_first": ("Profit-focused", "Prioritizes estimated rotation profit."),
     "soil_builder": ("Soil-building", "Prioritizes legume, cover, and soil-benefit traits."),
     "risk_balanced": ("Risk-balanced", "Favors more resilient crops with lower modeled risk."),
     "water_efficient": ("Water-efficient", "Favors lower water demand and profit per water unit."),
@@ -294,7 +294,8 @@ def _metrics(rotation: dict[str, Any], territory: dict[str, Any]) -> dict[str, A
         len(preferred.intersection(crop.id for crop in crops)) / len(preferred)
         if preferred else 1.0
     )
-    profit = sum(crop.profit_eur_ha for crop in crops)
+    profits = territory.get("crop_profit_eur_ha", {})
+    profit = sum(profits.get(crop.id, crop.profit_eur_ha) for crop in crops)
     soil_benefit = sum(crop.soil_benefit for crop in crops) / len(crops)
     risk = sum(crop.risk for crop in crops) / len(crops)
     water = sum(crop.water_demand_mm for crop in crops)
@@ -416,8 +417,8 @@ def _to_legacy_shape(
             "drought_tolerant": _role_assessment(crops, "drought_tolerant"),
         },
         "market_considerations": [
-            "Profit uses illustrative gross revenue and variable-cost assumptions.",
-            "Validate local buyers, input costs, and yield assumptions before use.",
+            "Revenue uses national average yields and market prices; seed and other costs are typical estimates.",
+            "Check local buyers, your own yields and input costs before use.",
         ],
         "evaluation": metrics,
         "comparison": {

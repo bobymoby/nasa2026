@@ -18,6 +18,26 @@ export function formatSigned(value: number): string {
     return `${value < 0 ? "−" : "+"}${eur.format(Math.abs(value))}`
 }
 
+const countryNames = new Intl.DisplayNames(["en"], { type: "region" })
+
+function countryName(code: string): string {
+    try {
+        return countryNames.of(code) ?? code
+    } catch {
+        return code
+    }
+}
+
+function formatYield(t: number | null): string {
+    return t === null
+        ? "–"
+        : `${t.toLocaleString("en-IE", { maximumFractionDigits: 2 })} t`
+}
+
+function formatPrice(eurPerT: number | null): string {
+    return eurPerT === null ? "–" : `${formatEur(eurPerT)}/t`
+}
+
 function formatHa(ha: number): string {
     return `${ha.toLocaleString("en-IE", { maximumFractionDigits: ha < 10 ? 2 : 0 })} ha`
 }
@@ -55,7 +75,7 @@ function ProfitChart({ byYear }: { byYear: Economics["byYear"] }) {
                                     height: `${height}%`,
                                     top: negative
                                         ? `${zeroAt * 100}%`
-                                        : `${(zeroAt * 100) - height}%`,
+                                        : `${zeroAt * 100 - height}%`,
                                 }}
                             >
                                 <span className="profit-value">
@@ -93,33 +113,60 @@ function EconomicsSection({
     const { perHa, total } = economics
     const breakdown = [
         { label: "Seed", value: perHa.seedCost },
-        { label: "Fertiliser, crop protection, machinery", value: perHa.operatingCost },
+        {
+            label: "Fertiliser, crop protection, machinery",
+            value: perHa.operatingCost,
+        },
     ]
+
+    const country = countryName(economics.country)
 
     return (
         <div className="economics">
+            {!economics.complete && (
+                <p className="economics-warning">
+                    {economics.missingData.join(", ")}: no published {country}{" "}
+                    yield and price, or no cost estimate. Left out of every
+                    total below, which cover the other crops only.
+                </p>
+            )}
             <div className="stat-tiles">
                 <div className="stat-tile hero">
-                    <span className="stat-label">Profit per hectare per year</span>
-                    <span className={`stat-value${economics.profitPerHaYear < 0 ? " negative" : ""}`}>
+                    <span className="stat-label">
+                        Profit per hectare per year
+                    </span>
+                    <span
+                        className={`stat-value${economics.profitPerHaYear < 0 ? " negative" : ""}`}
+                    >
                         {formatSigned(economics.profitPerHaYear)}
                     </span>
                 </div>
                 <div className="stat-tile">
                     <span className="stat-label">
-                        Profit on {formatHa(economics.areaHa)} over {years} years
+                        Profit on {formatHa(economics.areaHa)} over {years}{" "}
+                        years
                     </span>
-                    <span className={`stat-value${total.profit < 0 ? " negative" : ""}`}>
+                    <span
+                        className={`stat-value${total.profit < 0 ? " negative" : ""}`}
+                    >
                         {formatSigned(total.profit)}
                     </span>
                 </div>
                 <div className="stat-tile">
-                    <span className="stat-label">Revenue per ha, whole rotation</span>
-                    <span className="stat-value">{formatEur(perHa.revenue)}</span>
+                    <span className="stat-label">
+                        Revenue per ha, whole rotation
+                    </span>
+                    <span className="stat-value">
+                        {formatEur(perHa.revenue)}
+                    </span>
                 </div>
                 <div className="stat-tile">
-                    <span className="stat-label">Costs per ha, whole rotation</span>
-                    <span className="stat-value">{formatEur(perHa.totalCost)}</span>
+                    <span className="stat-label">
+                        Costs per ha, whole rotation
+                    </span>
+                    <span className="stat-value">
+                        {formatEur(perHa.totalCost)}
+                    </span>
                 </div>
             </div>
 
@@ -143,7 +190,11 @@ function EconomicsSection({
                         ))}
                         <div className="result">
                             <dt>Profit</dt>
-                            <dd className={perHa.profit < 0 ? "negative" : undefined}>
+                            <dd
+                                className={
+                                    perHa.profit < 0 ? "negative" : undefined
+                                }
+                            >
                                 {formatSigned(perHa.profit)}
                             </dd>
                         </div>
@@ -158,6 +209,8 @@ function EconomicsSection({
                         <tr>
                             <th>Crop</th>
                             <th>Role</th>
+                            <th className="num">Yield /ha</th>
+                            <th className="num">Price</th>
                             <th className="num">Revenue</th>
                             <th className="num">Cost</th>
                             <th className="num">Profit</th>
@@ -172,9 +225,17 @@ function EconomicsSection({
                                     {p.cropName}
                                 </td>
                                 <td>{ROLE_LABELS[p.role]}</td>
+                                <td className="num">
+                                    {formatYield(p.yieldTHa)}
+                                </td>
+                                <td className="num">
+                                    {formatPrice(p.priceEurT)}
+                                </td>
                                 <td className="num">{formatEur(p.revenue)}</td>
                                 <td className="num">{formatEur(p.cost)}</td>
-                                <td className={`num${p.profit < 0 ? " negative" : ""}`}>
+                                <td
+                                    className={`num${p.profit < 0 ? " negative" : ""}`}
+                                >
                                     {formatSigned(p.profit)}
                                 </td>
                                 <td className="basis">{p.source}</td>
@@ -185,13 +246,15 @@ function EconomicsSection({
             </div>
 
             <p className="economics-note">
-                Estimates.
-                {economics.priceYear &&
-                    ` Yields, prices and seed costs: Bulgarian market data for ${economics.priceYear}.`}{" "}
-                Other costs, cover crops and alfalfa hay are typical figures.
-                Land rent, subsidies, labour, overheads and tax are not
-                included. Money is
-                counted in the year the crop is harvested.
+                Revenue is {country}'s average yield times its average farm-gate
+                price over the last five years with data (Eurostat, FAOSTAT
+                where Eurostat has none)
+                {economics.priceYear
+                    ? `, with prices in ${economics.priceYear} euros`
+                    : ""}
+                . Seed, other costs and cover crops are typical figures. Land
+                rent, subsidies, labour, overheads and tax are not included.
+                Money is counted in the year the crop is harvested.
             </p>
         </div>
     )

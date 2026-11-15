@@ -5,6 +5,10 @@ producer prices (USD/t, converted at that year's Eurostat USD/EUR rate) fill
 any crop or year Eurostat lacks and cover non-EU countries. Values are deflated
 with the country's HICP where Eurostat publishes its prices, otherwise with
 the euro area's, to the latest HICP year.
+
+Yields per country come from Eurostat (apro_cpsh1, t/ha at EU standard
+humidity), with FAOSTAT production statistics filling crops or years it lacks.
+`market_reference` pairs each crop's reference price with its reference yield.
 """
 
 import csv
@@ -13,7 +17,7 @@ import statistics
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from functools import cache
 from pathlib import Path
 from typing import TypeVar
@@ -21,7 +25,7 @@ from typing import TypeVar
 import pycountry
 
 from app.services.prices import sources, store
-from app.services.prices.sources import EurostatPrice, FaoPrice, PriceSourceError
+from app.services.prices.sources import EurostatPrice, EurostatYield, FaoPrice, FaoYield, PriceSourceError
 from app.timing import timed
 
 log = logging.getLogger("app.prices")
@@ -36,6 +40,7 @@ VARIABILITY_YEARS = 10
 MIN_VARIABILITY_YEARS = 3
 VARIABILITY_LEVELS = [(0.15, "low"), (0.30, "medium"), (float("inf"), "high")]
 CONFIDENCE_ORDER = ["low", "medium", "high"]
+REFERENCE_YEARS = 5
 
 T = TypeVar("T")
 
@@ -46,6 +51,7 @@ class CropCodes:
     crop_name: str
     eurostat_prod_veg: str | None
     fao_item_code: int | None
+    eurostat_crops: str | None = None
 
 
 @dataclass(frozen=True)
@@ -76,6 +82,31 @@ class CountryPrices:
     rows: list[PriceRow]
 
 
+@dataclass(frozen=True)
+class YieldRef:
+    t_ha: float
+    years: tuple[int, int]
+    source: str
+
+
+@dataclass(frozen=True)
+class CropMarket:
+    price_eur_t: float | None = None
+    price_years: tuple[int, int] | None = None
+    price_source: str | None = None
+    price_confidence: str | None = None
+    yield_t_ha: float | None = None
+    yield_years: tuple[int, int] | None = None
+    yield_source: str | None = None
+
+
+@dataclass(frozen=True)
+class Market:
+    country: str
+    price_year: int | None
+    crops: dict[str, CropMarket]
+
+
 @cache
 def crop_codes() -> dict[str, CropCodes]:
     with MAPPING_CSV.open(newline="") as f:
@@ -83,6 +114,7 @@ def crop_codes() -> dict[str, CropCodes]:
             r["crop_id"]: CropCodes(
                 r["crop_id"], r["crop_name"], r["eurostat_prod_veg"] or None,
                 int(r["fao_item_code"]) if r["fao_item_code"] else None,
+                r["eurostat_crops"] or None,
             )
             for r in csv.DictReader(f)
         }
@@ -153,40 +185,67 @@ def _eurostat(geo: str) -> list[EurostatPrice]:
     )
 
 
-_fao_all: list[FaoPrice] | None = None
-_fao_loaded_at = 0.0
-_fao_lock = threading.Lock()
+@dataclass
+class _Bulk:
+    source: str
+    fetch: Callable[[set[int]], list]
+    put: Callable[[list], None]
+    has: Callable[[], bool]
+    rows: list | None = None
+    loaded_at: float = 0.0
+    lock: threading.Lock = field(default_factory=threading.Lock)
 
 
-def _ensure_fao_bulk() -> None:
-    """The FAOSTAT file covers every country, so it is fetched whole and stored once a month."""
-    global _fao_all, _fao_loaded_at
-    with _fao_lock:
-        if time.monotonic() - _fao_loaded_at < FAOSTAT_MAX_AGE_DAYS * 86400:
+_FAO_PRICES = _Bulk("faostat", sources.fetch_fao_bulk, store.put_fao, store.has_fao)
+_FAO_YIELDS = _Bulk("faostat_yield", sources.fetch_fao_yields, store.put_fao_yields, store.has_fao_yields)
+
+
+def _ensure_bulk(bulk: _Bulk) -> None:
+    """A FAOSTAT bulk file covers every country, so it is fetched whole and stored once a month."""
+    with bulk.lock:
+        if time.monotonic() - bulk.loaded_at < FAOSTAT_MAX_AGE_DAYS * 86400:
             return
-        if store.is_fresh("faostat", "bulk", FAOSTAT_MAX_AGE_DAYS):
-            _fao_loaded_at = time.monotonic()
+        if store.is_fresh(bulk.source, "bulk", FAOSTAT_MAX_AGE_DAYS):
+            bulk.loaded_at = time.monotonic()
             return
         items = {c.fao_item_code for c in crop_codes().values() if c.fao_item_code}
         try:
-            with timed("prices fetch faostat bulk", logging.INFO):
-                _fao_all = sources.fetch_fao_bulk(items)
+            with timed(f"prices fetch {bulk.source} bulk", logging.INFO):
+                bulk.rows = bulk.fetch(items)
         except PriceSourceError:
-            if store.has_fao():
-                log.warning("prices: FAOSTAT refresh failed, using stored data")
-                _fao_loaded_at = time.monotonic()
+            if bulk.has():
+                log.warning("prices: %s refresh failed, using stored data", bulk.source)
+                bulk.loaded_at = time.monotonic()
                 return
             raise
-        store.put_fao(_fao_all)
-        _fao_loaded_at = time.monotonic()
+        bulk.put(bulk.rows)
+        bulk.loaded_at = time.monotonic()
 
 
 def _fao(m49: int) -> list[FaoPrice]:
-    _ensure_fao_bulk()
+    _ensure_bulk(_FAO_PRICES)
     stored = store.get_fao(m49)
     if stored is not None:
         return stored
-    return [p for p in _fao_all or [] if p.m49 == m49]
+    return [p for p in _FAO_PRICES.rows or [] if p.m49 == m49]
+
+
+def _eurostat_yields(geo: str) -> list[EurostatYield]:
+    codes = {c.eurostat_crops for c in crop_codes().values() if c.eurostat_crops}
+    return _cached(
+        "eurostat_yield", geo, EUROSTAT_MAX_AGE_DAYS,
+        lambda: store.get_eurostat_yields(geo),
+        lambda: sources.fetch_eurostat_yields(geo, codes),
+        lambda data: store.put_eurostat_yields(geo, data),
+    )
+
+
+def _fao_yields(m49: int) -> list[FaoYield]:
+    _ensure_bulk(_FAO_YIELDS)
+    stored = store.get_fao_yields(m49)
+    if stored is not None:
+        return stored
+    return [y for y in _FAO_YIELDS.rows or [] if y.m49 == m49]
 
 
 def _series(table: str, key_col: str, source: str, key: str, fetch: Callable[[], dict[int, float]]) -> dict[int, float]:
@@ -283,3 +342,83 @@ def summarize(rows: list[PriceRow], reference_years: int, override: float | None
         "variability": variability,
         "history": rows,
     }
+
+
+def merge_yields(
+    crops: list[CropCodes], eurostat: list[EurostatYield], fao: list[FaoYield]
+) -> dict[str, list[tuple[int, float, str]]]:
+    """(year, t/ha, source) per crop: Eurostat where it has a value, FAOSTAT for the rest."""
+    out = {}
+    for crop in crops:
+        years: dict[int, tuple[float, str]] = {}
+        if crop.fao_item_code:
+            for y in fao:
+                if y.item_code == crop.fao_item_code:
+                    years[y.year] = (y.t_ha, "faostat")
+        if crop.eurostat_crops:
+            for y in eurostat:
+                if y.crops == crop.eurostat_crops:
+                    years[y.year] = (y.t_ha, "eurostat")
+        if years:
+            out[crop.crop_id] = [(year, t_ha, src) for year, (t_ha, src) in sorted(years.items())]
+    return out
+
+
+def _sources(names) -> str:
+    return " + ".join(sorted(set(names)))
+
+
+def reference_yield(rows: list[tuple[int, float, str]], reference_years: int = REFERENCE_YEARS) -> YieldRef | None:
+    recent = sorted(rows)[-reference_years:]
+    if not recent:
+        return None
+    return YieldRef(
+        round(statistics.fmean(t for _, t, _ in recent), 2),
+        (recent[0][0], recent[-1][0]),
+        _sources(src for _, _, src in recent),
+    )
+
+
+def country_yields(code: str, crop_ids: list[str] | None = None) -> dict[str, YieldRef]:
+    country = resolve_country(code)
+    mapping = crop_codes()
+    crops = [mapping[c] for c in (crop_ids or list(mapping)) if c in mapping]
+    merged = merge_yields(crops, _eurostat_yields(country.eurostat_geo), _fao_yields(country.m49))
+    return {crop_id: ref for crop_id, rows in merged.items() if (ref := reference_yield(rows))}
+
+
+def market_reference(code: str, crop_ids: list[str]) -> Market:
+    """Reference price and yield per crop; a part whose sources fail is left out, not invented."""
+    price_year = None
+    prices: dict[str, CropMarket] = {}
+    try:
+        data = country_prices(code, crop_ids)
+        price_year = data.price_year
+        by_crop: dict[str, list[PriceRow]] = {}
+        for row in data.rows:
+            by_crop.setdefault(row.crop_id, []).append(row)
+        for crop_id, rows in by_crop.items():
+            s = summarize(rows, REFERENCE_YEARS, None)
+            if s["market_reference_price"] is None:
+                continue
+            prices[crop_id] = CropMarket(
+                price_eur_t=s["market_reference_price"],
+                price_years=tuple(s["reference_years"]),
+                price_source=_sources(r.source for r in s["history"][-REFERENCE_YEARS:]),
+                price_confidence=s["confidence"],
+            )
+    except PriceSourceError as e:
+        log.warning("market reference: no prices for %s: %s", code, e)
+    try:
+        yields = country_yields(code, crop_ids)
+    except PriceSourceError as e:
+        log.warning("market reference: no yields for %s: %s", code, e)
+        yields = {}
+    crops = {}
+    for crop_id in crop_ids:
+        price, ref = prices.get(crop_id, CropMarket()), yields.get(crop_id)
+        if ref:
+            price = replace(price, yield_t_ha=ref.t_ha, yield_years=ref.years, yield_source=ref.source)
+        if price != CropMarket():
+            crops[crop_id] = price
+    return Market(code.upper(), price_year, crops)
