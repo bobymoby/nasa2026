@@ -28,6 +28,9 @@
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
             pkgs.stdenv.cc.cc.lib
             pkgs.zlib
+            # rasterio's GDAL wheel needs libexpat; same nixpkgs as python3, so
+            # it matches the expat python's own pyexpat was built against
+            pkgs.expat
           ];
         };
       }

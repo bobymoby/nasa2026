@@ -26,6 +26,8 @@ import {
     fetchField,
 } from "../../api/fetchField"
 import { prefetchFieldNdvi } from "../../api/fetchFieldNdvi"
+import { prefetchSuitability } from "../../api/fetchCrops"
+import { prefetchSiteContext } from "../../api/fetchSiteContext"
 
 const SELECTION_SOURCE_ID = "selection"
 const FIELDS_SOURCE_ID = "fields"
@@ -64,9 +66,45 @@ type FieldTileProperties = {
 // @types/geojson isn't installed, so mapbox's feature type has no `properties`
 function tileProperties(e: MapMouseEvent): FieldTileProperties | undefined {
     const feature = e.features?.[0] as
-        | { properties?: FieldTileProperties }
-        | undefined
+        { properties?: FieldTileProperties } | undefined
     return feature?.properties
+}
+
+// selects a field the moment it is clicked; the full outline replaces it once
+// GET /fields/{id} answers (the tile geometry is clipped at tile edges)
+function fieldFromTile(e: MapMouseEvent): Field | undefined {
+    const feature = e.features?.[0] as
+        | {
+              properties?: FieldTileProperties
+              geometry?: { type: string; coordinates: unknown }
+          }
+        | undefined
+    const props = feature?.properties
+    const geometry = feature?.geometry
+    if (typeof props?.field_id !== "string" || !geometry) return undefined
+    let rings: number[][][]
+    if (geometry.type === "Polygon")
+        rings = geometry.coordinates as number[][][]
+    else if (geometry.type === "MultiPolygon")
+        rings = (geometry.coordinates as number[][][][])[0]
+    else return undefined
+    return {
+        type: "Feature",
+        id: props.field_id,
+        geometry: { type: "Polygon", coordinates: rings },
+        properties: {
+            field_id: props.field_id,
+            farm_id: null,
+            crop_code: null,
+            crop_name: null,
+            crop_name_en: null,
+            crop_category: props.crop_category ?? null,
+            crop_category_code: null,
+            organic: props.organic == null ? null : Number(props.organic),
+            field_size: props.field_size ?? null,
+            area_ha: props.field_size ?? 0,
+        },
+    }
 }
 
 // "winter_common_soft_wheat" -> "Winter common soft wheat"
@@ -251,7 +289,12 @@ function Map({
         const updateViewBox = () => {
             const b = map.getBounds()
             if (b) {
-                setViewBox([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()])
+                setViewBox([
+                    b.getWest(),
+                    b.getSouth(),
+                    b.getEast(),
+                    b.getNorth(),
+                ])
             }
         }
         map.on("load", updateViewBox)
@@ -448,8 +491,7 @@ function Map({
 
     useEffect(() => {
         const source = mapRef.current?.getSource(SELECTION_SOURCE_ID) as
-            | GeoJSONSource
-            | undefined
+            GeoJSONSource | undefined
         source?.setData(selectionGeoJSON(bounds))
     }, [bounds])
 
@@ -476,8 +518,7 @@ function Map({
 
     useEffect(() => {
         const source = mapRef.current?.getSource(SELECTED_FIELDS_SOURCE_ID) as
-            | GeoJSONSource
-            | undefined
+            GeoJSONSource | undefined
         source?.setData(selectedFieldsGeoJSON(selectedFields))
     }, [selectedFields])
 
@@ -515,8 +556,9 @@ function Map({
             tooltip.remove()
         }
         const onClick = (e: MapMouseEvent) => {
-            const fieldId = tileProperties(e)?.field_id
-            if (typeof fieldId !== "string") return
+            const provisional = fieldFromTile(e)
+            if (!provisional) return
+            const fieldId = provisional.id
 
             const current = selectedFieldsRef.current
             if (current.some((f) => f.id === fieldId)) {
@@ -526,6 +568,9 @@ function Map({
                 return
             }
 
+            onSelectedFieldsChangeRef.current([...current, provisional])
+            prefetchSuitability([provisional])
+
             const pending = pendingFieldsRef.current
             if (pending.has(fieldId)) return
             pending.add(fieldId)
@@ -533,10 +578,12 @@ function Map({
             fetchField(fieldId)
                 .then((field) => {
                     const latest = selectedFieldsRef.current
-                    if (latest.some((f) => f.id === field.id)) return
-                    onSelectedFieldsChangeRef.current([...latest, field])
-                    // start the slow Sentinel-2 fetch now, not when NDVI is run
+                    if (!latest.some((f) => f.id === field.id)) return
+                    onSelectedFieldsChangeRef.current(
+                        latest.map((f) => (f.id === field.id ? field : f)),
+                    )
                     prefetchFieldNdvi([field])
+                    prefetchSiteContext([field])
                 })
                 .catch((err) =>
                     setFieldError(
@@ -804,10 +851,7 @@ function Map({
                                 }
                             />
                         </label>
-                        <SoilLegend
-                            box={viewBox}
-                            enabled={soilOpacity > 0}
-                        />
+                        <SoilLegend box={viewBox} enabled={soilOpacity > 0} />
                     </div>
                 </div>
             ) : (

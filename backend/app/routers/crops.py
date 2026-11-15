@@ -1,11 +1,16 @@
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
+<<<<<<< HEAD
 from app.services.rotation_risks import CROPS as ROTATION_CROPS
 from app.services.rotation_risks import rotation_risks
+=======
+from app.services.crop_soil_scores import GAEZ_SOIL_CROPS, all_soil_scores
+>>>>>>> 1124dd1a87c369223a3813e8956edc7d4bb064e4
 from app.services.crop_suitability import (
     ClimateFeatures,
     SoilFeatures,
@@ -44,47 +49,64 @@ class SelectedField(CamelModel):
     polygon: list[Point] = Field(min_length=3)
 
 
-class FieldsRequest(CamelModel):
-    fields: list[SelectedField] = Field(min_length=1, max_length=10_000)
+class SoilImpact(CamelModel):
+    crop: str = Field(description="Row in crop_soil_scores")
+    score: int | None = Field(description="Soil health score, 0..100")
+    nitrogen_added: int | None = Field(description="Nitrogen added (legumes), 0..3")
+    organic_matter: int | None = Field(description="Roots and residue building organic matter, 0..3")
+    soil_cover: float | None = Field(description="Time the soil is covered by living plants, 0..3")
+    soil_disturbance: int | None = Field(description="Ploughing, digging at harvest, -3..0")
+    break_crop: int | None = Field(description="Interrupts disease cycles, feeds soil life, 0..2")
+    removal_compaction: int | None = Field(description="Whole-plant removal or compaction, -2..0")
+    family: str | None
+    note: str | None
 
 
-class Crop(CamelModel):
-    id: str
+class SoilScoredCrop(CamelModel):
+    id: str = Field(description="crop_soil_scores key, e.g. winter_common_soft_wheat")
     name: str
+    gaez_codes: list[str] = Field(description="GAEZ crops this row stands for, e.g. ['whe']")
+    soil: SoilImpact
 
 
-class CropsResponse(CamelModel):
-    crops: list[Crop]
+class SoilScoresResponse(CamelModel):
+    crops: list[SoilScoredCrop]
 
 
-# TODO: replace with real logic based on the selected area
-STUB_CROPS = [
-    Crop(id="wheat", name="Wheat"),
-    Crop(id="maize", name="Maize"),
-    Crop(id="sunflower", name="Sunflower"),
-    Crop(id="barley", name="Barley"),
-    Crop(id="rapeseed", name="Rapeseed"),
-]
+log = logging.getLogger(__name__)
 
 
-@router.post(
-    "/crops/bounds",
-    response_model=CropsResponse,
+def _crop_name(key: str) -> str:
+    words = key.replace("_", " ")
+    return words[:1].upper() + words[1:]
+
+
+@router.get(
+    "/crops/soil-scores",
+    response_model=SoilScoresResponse,
     response_model_by_alias=True,
-    summary="Crops available in a rectangle",
+    summary="How every scored crop affects the soil (crop_soil_scores)",
 )
-def crops_for_bounds(bounds: Bounds) -> CropsResponse:
-    return CropsResponse(crops=STUB_CROPS)
-
-
-@router.post(
-    "/crops/fields",
-    response_model=CropsResponse,
-    response_model_by_alias=True,
-    summary="Crops available on a set of selected fields",
-)
-def crops_for_fields(selection: FieldsRequest) -> CropsResponse:
-    return CropsResponse(crops=STUB_CROPS)
+def soil_scores() -> SoilScoresResponse:
+    try:
+        scores = all_soil_scores()
+    except Exception as e:
+        log.exception("could not load crop_soil_scores")
+        raise HTTPException(503, "Crop soil data is unavailable") from e
+    codes: dict[str, list[str]] = {}
+    for code, key in GAEZ_SOIL_CROPS.items():
+        codes.setdefault(key, []).append(code)
+    return SoilScoresResponse(
+        crops=[
+            SoilScoredCrop(
+                id=s.crop,
+                name=_crop_name(s.crop),
+                gaez_codes=codes.get(s.crop, []),
+                soil=SoilImpact(**vars(s)),
+            )
+            for s in scores
+        ]
+    )
 
 
 # ------------------------------------------------------------ suitability

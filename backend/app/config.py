@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     log_level: str = "DEBUG"
 
     # PostGIS database from the repo-root docker-compose.yml
-    database_url: str = "postgresql://nasa:nasa@localhost:5432/nasa"
+    database_url: str = "postgresql://nasa:nasa@10.232.178.179:5432/nasa"
 
 
 settings = Settings()

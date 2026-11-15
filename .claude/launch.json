@@ -4,9 +4,45 @@
     {
       "name": "frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "frontend", "start"],
-      "env": { "BROWSER": "none" },
+      "runtimeArgs": [
+        "--prefix",
+        "frontend",
+        "start"
+      ],
+      "env": {
+        "BROWSER": "none"
+      },
       "port": 3000
+    },
+    {
+      "name": "frontend-3001",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "frontend",
+        "start"
+      ],
+      "env": {
+        "BROWSER": "none",
+        "PORT": "3001",
+        "REACT_APP_API_URL": "http://localhost:8001"
+      },
+      "port": 3001
+    },
+    {
+      "name": "backend-8001",
+      "runtimeExecutable": "backend/.venv/bin/uvicorn",
+      "runtimeArgs": [
+        "app.main:app",
+        "--app-dir",
+        "backend",
+        "--port",
+        "8001"
+      ],
+      "env": {
+        "CORS_ORIGINS": "[\"http://localhost:3001\"]"
+      },
+      "port": 8001
     }
   ]
 }
