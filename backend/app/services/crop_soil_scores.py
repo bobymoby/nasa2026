@@ -2,6 +2,7 @@
 (loaded by app.import_crop_csvs)."""
 
 from dataclasses import dataclass
+from functools import cache
 
 from app.db import pool
 
@@ -56,8 +57,10 @@ class SoilScore:
     note: str | None
 
 
-def all_soil_scores() -> list[SoilScore]:
-    """Rows without a score aren't crops and are left out."""
+@cache
+def all_soil_scores() -> tuple[SoilScore, ...]:
+    """Rows without a score aren't crops and are left out. The table only changes on
+    re-import, so it is read once per process; a failed read is not cached."""
     with pool.connection(timeout=5) as conn:
         rows = conn.execute(
             """
@@ -69,7 +72,7 @@ def all_soil_scores() -> list[SoilScore]:
             ORDER BY crop
             """
         ).fetchall()
-    return [
+    return tuple(
         SoilScore(
             crop=crop,
             score=score,
@@ -83,7 +86,7 @@ def all_soil_scores() -> list[SoilScore]:
             note=note,
         )
         for crop, score, n, r, c, d, b, x, family, note in rows
-    ]
+    )
 
 
 def hcat3_codes(crops: list[str]) -> dict[str, int]:

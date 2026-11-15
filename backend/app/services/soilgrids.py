@@ -9,6 +9,7 @@ from app.cache import cached_json
 from shapely.geometry import Polygon
 
 from app.geo import Rect
+from app.services.soilgrids_store import stored_layers
 
 SOILGRIDS_PROPERTIES_URL = "https://rest.isric.org/soilgrids/v2.0/properties/query"
 SOILGRIDS_RESOLUTION_M = 250
@@ -102,6 +103,9 @@ def _fetch_properties(lat: float, lng: float, property_names: tuple[str, ...]) -
 
 
 def _cached_properties(lat: float, lng: float, property_names: tuple[str, ...]) -> list:
+    stored = stored_layers(lat, lng, property_names)
+    if stored is not None:
+        return stored
     key = {"lat": lat, "lng": lng, "properties": property_names}
     result = cached_json(
         "soilgrids_properties",

@@ -1,3 +1,4 @@
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,6 +8,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from app.config import settings
 from app.db import pool
 from app.routers import climate, crops, drought, fields, health, prices, sentinel, soil, strategies
+from app.services.crop_soil_scores import all_soil_scores
 from app.timing import setup as setup_logging
 
 setup_logging(settings.log_level)
@@ -15,6 +17,8 @@ setup_logging(settings.log_level)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     pool.open()
+    # read the static soil-score table before pages compete for connections
+    threading.Thread(target=all_soil_scores, name="soil-scores-warm", daemon=True).start()
     yield
     pool.close()
 
