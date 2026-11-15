@@ -291,21 +291,15 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
         "excluded_crops": request.excluded_crops,
         "crop_suitability": request.crop_suitability,
         "irrigation_available": request.irrigation_available,
-        "baseline_rotation": request.baseline_rotation or list(
-            svc.DEFAULT_BASELINE[:request.years]
-        ),
+        "baseline_rotation": request.baseline_rotation or list(svc.DEFAULT_BASELINE),
         "strategy_weights": {
             name: weights.model_dump(exclude_none=True)
             for name, weights in (request.strategy_weights or {}).items()
         },
     }
 
-    selected_crop_ids = request.crops or request.available_crops or []
-    crop_ids = (
-        [crop_id for crop_id in selected_crop_ids if crop_id in set(request.available_crops)]
-        if request.crops and request.available_crops
-        else selected_crop_ids
-    )
+    selected_crop_ids = list(dict.fromkeys(request.crops or request.available_crops or []))
+    crop_ids = selected_crop_ids
     unknown_crops = set(selected_crop_ids) - set(svc.CROP_BY_ID)
     if unknown_crops:
         supported_ids = ", ".join(sorted(svc.CROP_BY_ID))
@@ -314,11 +308,44 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
             f"Unknown selected crop id(s): {', '.join(sorted(unknown_crops))}. "
             f"Supported mock crop IDs: {supported_ids}.",
         )
+    effective_years = max(request.years, len(crop_ids))
+    baseline_source = territory["baseline_rotation"]
+    territory["baseline_rotation"] = [
+        baseline_source[index % len(baseline_source)]
+        for index in range(effective_years)
+    ]
     try:
-        rotations = svc.generate_valid_rotations(
-            territory, crop_ids, years=request.years
+        selected_rotations = svc.generate_valid_rotations(
+            territory,
+            crop_ids,
+            years=effective_years,
+            required_crop_ids=crop_ids,
         )
-        ranked = svc.rank_rotation_strategies(rotations, territory)
+        selected_strategies = svc.rank_rotation_strategies(
+            selected_rotations,
+            territory,
+            strategy_types=[
+                "profit_first", "soil_builder", "risk_balanced", "water_efficient"
+            ],
+        )
+        balanced_years = max(effective_years, len(crop_ids) + 1)
+        balanced_rotations = svc.generate_valid_rotations(
+            territory,
+            list(svc.CROP_BY_ID),
+            years=balanced_years,
+            required_crop_ids=crop_ids,
+            require_additional_crop=True,
+        )
+        if not balanced_rotations:
+            balanced_rotations = selected_rotations
+        balanced_strategy = svc.rank_rotation_strategies(
+            balanced_rotations,
+            territory,
+            strategy_types=["balanced"],
+        )
+        ranked = [*selected_strategies, *balanced_strategy]
+        for ranking, strategy in enumerate(ranked, start=1):
+            strategy["ranking"] = ranking
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -332,12 +359,14 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
         )
     return StrategiesResponse(
         data_mode="illustrative_mock",
-        rotations_evaluated=len(rotations),
+        rotations_evaluated=len(selected_rotations) + len(balanced_rotations),
         baseline_rotation=territory["baseline_rotation"],
         baseline=svc.evaluate_baseline(territory),
         assumptions=[
             "Crop suitability, revenue, costs, soil benefits, risk, and water demand are illustrative mock values.",
             "Use locally validated crop calendars and rotation-gap rules before making farm decisions.",
+            "The first four strategies include every selected crop; the balanced strategy may add another crop.",
+            "Rotation length expands when needed to include every selected crop.",
             "The area is accepted for API compatibility; mock crop values are not spatially derived.",
         ],
         strategies=[{**s, "economics": _economics(s, area_ha)} for s in ranked],

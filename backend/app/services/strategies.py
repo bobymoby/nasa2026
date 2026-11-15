@@ -5,7 +5,7 @@ budgets or agronomic recommendations.
 """
 
 from dataclasses import dataclass
-from itertools import product
+from itertools import islice, permutations, product
 from typing import Any
 
 
@@ -61,6 +61,10 @@ MOCK_CROPS: tuple[CropProfile, ...] = (
                 ("deep_rooting",), note="Illustrative spring-sown flax profile."),
     CropProfile("buckwheat", "Buckwheat", "pseudocereal", 5, 9, 1550, 780, 68, 42, 320, 66,
                 ("drought_tolerant",), note="Illustrative warm-season buckwheat profile."),
+    CropProfile("rye", "Rye", "cereal", 9, 7, 1280, 670, 58, 38, 330, 68,
+                ("cover", "drought_tolerant"), note="Illustrative autumn-sown rye profile."),
+    CropProfile("sorghum", "Sorghum", "cereal", 5, 9, 1600, 850, 50, 46, 390, 62,
+                ("drought_tolerant",), note="Illustrative warm-season sorghum profile."),
 )
 
 CROP_BY_ID = {crop.id: crop for crop in MOCK_CROPS}
@@ -97,6 +101,7 @@ STRATEGY_NAMES = {
 DEFAULT_BASELINE = ("wheat", "sunflower", "barley", "chickpea", "rapeseed")
 MIN_SUITABILITY = 25.0
 MAX_FALLOW_MONTHS = 10
+MAX_ROTATIONS = 5000
 
 
 def _crop_profile(value: CropProfile | str | dict[str, Any]) -> CropProfile:
@@ -189,12 +194,15 @@ def generate_valid_rotations(
     territory: dict[str, Any],
     crops: list[CropProfile | str | dict[str, Any]],
     years: int = 3,
+    required_crop_ids: list[str] | None = None,
+    require_additional_crop: bool = False,
 ) -> list[dict[str, Any]]:
     """Enumerate season-compatible crop sequences and score rotation gaps.
 
     ``previously_planted`` is chronological, oldest to newest. A candidate
     crop sequence has one crop event per requested position; calendar dates
-    are scheduled after the prior crop's harvest.
+    are scheduled after the prior crop's harvest. When required crops are
+    supplied, every returned sequence includes all of them.
     """
     if years < 1:
         raise ValueError("years must be at least 1")
@@ -203,10 +211,53 @@ def generate_valid_rotations(
     if not available:
         return []
 
+    required_ids = set(required_crop_ids or ())
+    available_by_id = {crop.id: crop for crop in available}
+    if not required_ids.issubset(available_by_id):
+        return []
+    if len(required_ids) > years:
+        raise ValueError("years must be at least the number of required crops")
+
     history = list(territory.get("previously_planted", ()))
     rotations = []
-    for ids in product(available, repeat=years):
-        sequence = tuple(ids)
+    if required_crop_ids is None:
+        sequences = product(available, repeat=years)
+    elif years <= 5:
+        sequences = (
+            sequence for sequence in product(available, repeat=years)
+            if required_ids.issubset(crop.id for crop in sequence)
+            and (
+                not require_additional_crop
+                or any(crop.id not in required_ids for crop in sequence)
+            )
+        )
+    elif require_additional_crop and years == len(required_ids) + 1:
+        required_crops = [available_by_id[crop_id] for crop_id in required_crop_ids]
+        optional_crops = [
+            crop for crop in available if crop.id not in required_ids
+        ]
+        sequences = (
+            sequence
+            for optional in optional_crops
+            for sequence in islice(
+                permutations([*required_crops, optional]),
+                MAX_ROTATIONS,
+            )
+        )
+    else:
+        required_crops = [available_by_id[crop_id] for crop_id in required_crop_ids]
+        sequences = islice(permutations(required_crops), MAX_ROTATIONS)
+
+    for sequence in sequences:
+        if required_crop_ids is not None and not required_ids.issubset(
+            crop.id for crop in sequence
+        ):
+            continue
+        if require_additional_crop and not any(
+            crop.id not in required_ids for crop in sequence
+        ):
+            continue
+        sequence = tuple(sequence)
         schedule = _schedule(sequence)
         if schedule is None:
             continue
@@ -409,7 +460,9 @@ def _explanations(metrics: dict[str, Any], baseline: dict[str, Any], crops: list
 
 
 def rank_rotation_strategies(
-    rotations: list[dict[str, Any]], territory: dict[str, Any]
+    rotations: list[dict[str, Any]],
+    territory: dict[str, Any],
+    strategy_types: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return the top rotation for each strategy objective, reusing when needed."""
     if not rotations:
@@ -429,13 +482,21 @@ def rank_rotation_strategies(
             _linear_score(efficiency, *water_range), 2
         )
 
-    profiles = dict(STRATEGY_PROFILES)
+    profiles = {
+        name: weights
+        for name, weights in STRATEGY_PROFILES.items()
+        if strategy_types is None or name in strategy_types
+    }
     for name, overrides in territory.get("strategy_weights", {}).items():
-        if name not in profiles:
+        if name not in STRATEGY_PROFILES:
             raise ValueError(f"Unknown strategy weight profile: {name}")
         if any(value < 0 for value in overrides.values()):
             raise ValueError("strategy weights must be non-negative")
-        profiles[name] = {component: overrides.get(component, 0.0) for component in COMPONENTS}
+        if name in profiles:
+            profiles[name] = {
+                component: overrides.get(component, 0.0)
+                for component in COMPONENTS
+            }
     used_rotations: set[tuple[str, ...]] = set()
     strategies = []
     for strategy_type, default_weights in profiles.items():
