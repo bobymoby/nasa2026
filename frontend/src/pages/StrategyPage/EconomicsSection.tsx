@@ -23,8 +23,15 @@ function countryName(code: string): string {
     }
 }
 
+<<<<<<< HEAD
 function formatYield(t: number): string {
     return `${t.toLocaleString("en-IE", { maximumFractionDigits: 2 })} t`
+=======
+function formatYield(t: number | null): string {
+    return t == null
+        ? "—"
+        : `${t.toLocaleString("en-IE", { maximumFractionDigits: 2 })} t`
+>>>>>>> origin/main
 }
 
 function formatPrice(eurPerT: number): string {
@@ -108,7 +115,21 @@ function EconomicsSection({
                 </div>
                 <div className="stat-tile">
                     <span className="stat-label">
+<<<<<<< HEAD
                         Revenue on {formatHa(economics.areaHa)} over {years}{" "}
+=======
+                        With EU CAP payments, per ha per year
+                    </span>
+                    <span
+                        className={`stat-value${economics.profitWithCapPerHaYear < 0 ? " negative" : ""}`}
+                    >
+                        {formatSigned(economics.profitWithCapPerHaYear)}
+                    </span>
+                </div>
+                <div className="stat-tile">
+                    <span className="stat-label">
+                        Profit on {formatHa(economics.areaHa)} over {years}{" "}
+>>>>>>> origin/main
                         years
                     </span>
                     <span className="stat-value">
@@ -163,13 +184,60 @@ function EconomicsSection({
                 </table>
             </div>
 
+            <h4>EU CAP payments (per ha, whole rotation)</h4>
+            {economics.capPayments.length > 0 ? (
+                <div className="economics-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Payment</th>
+                                <th className="num">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {economics.capPayments.map((p) => (
+                                <tr key={p.name}>
+                                    <td>{p.name}</td>
+                                    <td className="num">
+                                        {formatEur(p.eurPerHa)}
+                                    </td>
+                                </tr>
+                            ))}
+                            <tr className="cap-total">
+                                <td>Total</td>
+                                <td className="num">
+                                    {formatEur(economics.capPerHa)}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            ) : (
+                <p className="economics-note">
+                    No CAP payments apply to this plan.
+                </p>
+            )}
+
             <p className="economics-note">
+<<<<<<< HEAD
                 Revenue is {country}'s national five-year average yield times
                 its farm-gate price (Eurostat, FAOSTAT where Eurostat has no
                 data), with prices in {economics.priceYear} euros. Vegetable
                 yields are fresh weight. There is no cost data, so costs and
                 profit are not shown. Money is counted in the year the crop is
                 harvested.
+=======
+                Revenue uses {country}'s national five-year average yield and
+                farm-gate price (Eurostat, FAOSTAT where Eurostat has no data),
+                with prices in {economics.priceYear ?? "the latest available"}{" "}
+                euros. Seed and operating costs are estimates. CAP payments are
+                the amounts Bulgaria paid per hectare for claim year 2024
+                (Ministry of Agriculture, Annual Performance Report 2025) and
+                assume you apply and meet each scheme’s conditions; the selected
+                area is treated as your whole farm. Land rent, labour, overheads
+                and tax are not included. Money is counted in the year the crop
+                is harvested.
+>>>>>>> origin/main
             </p>
         </div>
     )

@@ -6,12 +6,28 @@ Eurostat has none; prices in real euros of the price year). There is no cost
 data, so no cost or profit is computed. Only crops with a yield, a price and
 their variability are plannable (`plannable`).
 
+<<<<<<< HEAD
 Money is attributed to the harvest year; a forage ley earns every season.
+=======
+Costs are still hard-coded estimates for Bulgarian conditions, one entry per
+harvested crop and no catch-all default:
+- seed, and other operating costs (fertiliser, crop protection, machinery and fuel)
+- cover crops (seed + sowing and termination; no harvest)
+
+A crop missing its market figures or its cost estimate is left out of the
+totals and marks the strategy incomplete; nothing is filled in by hand.
+
+Money is attributed to the harvest year; a forage ley is split per season.
+
+EU CAP payments (`cap_payments`) are kept apart from the market profit, so
+`profit` is what the crops earn and `profit_with_cap` adds the payments.
+>>>>>>> origin/main
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from app.services import cap_payments
 from app.services.prices.pipeline import CropMarket, Market
 
 
@@ -34,7 +50,20 @@ class StrategyRevenue:
     plantings: list[PlantingRevenue]
     years: int
     country: str
+<<<<<<< HEAD
     price_year: int
+=======
+    price_year: int | None
+    cap: list[cap_payments.CapLine] = field(default_factory=list)
+
+    @property
+    def cap_total(self) -> float:
+        return sum(line.eur_per_ha for line in self.cap)
+
+    @property
+    def profit_with_cap(self) -> float:
+        return self.profit + self.cap_total
+>>>>>>> origin/main
 
     @property
     def revenue(self) -> float:
@@ -115,13 +144,23 @@ def _planting_economics(p: dict, market: Market) -> PlantingEconomics:
     )
 
 
+<<<<<<< HEAD
 def strategy_revenue(plantings: list[dict], years: int, market: Market) -> StrategyRevenue:
     """Per-hectare revenue of one pass through a generated rotation."""
     return StrategyRevenue(
         plantings=[_planting_revenue(p, market) for p in plantings],
+=======
+def strategy_economics(
+    plantings: list[dict], years: int, market: Market, area_ha: float = 0.0,
+) -> StrategyEconomics:
+    """Per-hectare economics of one pass through a generated rotation."""
+    return StrategyEconomics(
+        plantings=[_planting_economics(p, market) for p in plantings],
+>>>>>>> origin/main
         years=years,
         country=market.country,
         price_year=market.price_year,
+        cap=cap_payments.cap_lines(plantings, years, area_ha),
     )
 
 

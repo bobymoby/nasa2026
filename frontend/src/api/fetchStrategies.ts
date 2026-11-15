@@ -33,6 +33,16 @@ export type EconomicsMoney = {
     profit: number
 }
 
+export type CapPayment = {
+    name: string
+    eurPerHa: number
+    interventions: string[]
+    claimYear: number
+    source: string
+    // set when the eligibility rule is assumed rather than published
+    assumption: string | null
+}
+
 // Current backend contract matches the data returned by app.routers.strategies.
 // Legacy compatibility aliases are kept to support older frontend code paths.
 export type Economics = {
@@ -60,6 +70,11 @@ export type Economics = {
         source: string
     }[]
     byYear: { year: number; revenue: number; cost: number; profit: number }[]
+    // EU CAP payments per ha over the whole rotation, kept apart from market profit
+    capPayments: CapPayment[]
+    capPerHa: number
+    profitWithCapPerHaYear: number
+    totalProfitWithCap: number
     // Legacy compatibility values for older code paths; computed when absent.
     revenuePerHa?: number
     revenuePerHaYear?: number
