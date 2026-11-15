@@ -6,15 +6,15 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
 from app.services.crop_soil_scores import GAEZ_SOIL_CROPS, all_soil_scores
-from app.services.rotation_risks import ALIASES as ROTATION_ALIASES
-from app.services.rotation_risks import CROPS as ROTATION_CROPS
-from app.services.rotation_risks import rotation_risks
 from app.services.crop_suitability import (
     ClimateFeatures,
     SoilFeatures,
     suitable_crops,
     texture_class,
 )
+from app.services.rotation_risks import ALIASES as ROTATION_ALIASES
+from app.services.rotation_risks import CROPS as ROTATION_CROPS
+from app.services.rotation_risks import rotation_risks
 
 router = APIRouter(tags=["crops"])
 
@@ -51,11 +51,21 @@ class SoilImpact(CamelModel):
     crop: str = Field(description="Row in crop_soil_scores")
     score: int | None = Field(description="Soil health score, 0..100")
     nitrogen_added: int | None = Field(description="Nitrogen added (legumes), 0..3")
-    organic_matter: int | None = Field(description="Roots and residue building organic matter, 0..3")
-    soil_cover: float | None = Field(description="Time the soil is covered by living plants, 0..3")
-    soil_disturbance: int | None = Field(description="Ploughing, digging at harvest, -3..0")
-    break_crop: int | None = Field(description="Interrupts disease cycles, feeds soil life, 0..2")
-    removal_compaction: int | None = Field(description="Whole-plant removal or compaction, -2..0")
+    organic_matter: int | None = Field(
+        description="Roots and residue building organic matter, 0..3"
+    )
+    soil_cover: float | None = Field(
+        description="Time the soil is covered by living plants, 0..3"
+    )
+    soil_disturbance: int | None = Field(
+        description="Ploughing, digging at harvest, -3..0"
+    )
+    break_crop: int | None = Field(
+        description="Interrupts disease cycles, feeds soil life, 0..2"
+    )
+    removal_compaction: int | None = Field(
+        description="Whole-plant removal or compaction, -2..0"
+    )
     family: str | None
     note: str | None
 
@@ -63,7 +73,9 @@ class SoilImpact(CamelModel):
 class SoilScoredCrop(CamelModel):
     id: str = Field(description="crop_soil_scores key, e.g. winter_common_soft_wheat")
     name: str
-    gaez_codes: list[str] = Field(description="GAEZ crops this row stands for, e.g. ['whe']")
+    gaez_codes: list[str] = Field(
+        description="GAEZ crops this row stands for, e.g. ['whe']"
+    )
     soil: SoilImpact
 
 
@@ -109,6 +121,7 @@ def soil_scores() -> SoilScoresResponse:
 
 # ------------------------------------------------------------ suitability
 
+
 class SoilInput(CamelModel):
     """Every field is optional; unknown factors are not scored."""
 
@@ -118,7 +131,9 @@ class SoilInput(CamelModel):
     )
     sand_pct: float | None = Field(default=None, ge=0, le=100)
     clay_pct: float | None = Field(default=None, ge=0, le=100)
-    depth_cm: float | None = Field(default=None, ge=0, description="Rootable soil depth")
+    depth_cm: float | None = Field(
+        default=None, ge=0, description="Rootable soil depth"
+    )
     drainage: Literal["poor", "well", "excessive"] | None = None
     salinity_ds_m: float | None = Field(
         default=None, ge=0, description="Electrical conductivity, dS/m"
@@ -138,10 +153,14 @@ class ClimateInput(CamelModel):
     """Monthly climatology, e.g. averaged /api/climate/monthly rows."""
 
     temperature: list[float] = Field(
-        min_length=12, max_length=12, description="Mean air temperature, °C, January first"
+        min_length=12,
+        max_length=12,
+        description="Mean air temperature, °C, January first",
     )
     precipitation: list[float] = Field(
-        min_length=12, max_length=12, description="Precipitation, mm/month, January first"
+        min_length=12,
+        max_length=12,
+        description="Precipitation, mm/month, January first",
     )
     min_temperature: list[float] | None = Field(
         default=None,
@@ -245,7 +264,7 @@ class RotationRequest(CamelModel):
     crops: list[str] = Field(
         min_length=1,
         max_length=50,
-        description="Crop ids in planting order, e.g. [\"sunflower\", \"wheat\"]",
+        description='Crop ids in planting order, e.g. ["sunflower", "wheat"]',
         examples=[["sunflower", "wheat", "maize"]],
     )
 

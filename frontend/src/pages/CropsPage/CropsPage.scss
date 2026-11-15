@@ -209,11 +209,110 @@ $grid-gap: 12px; // GRID_GAP in CropsPage.tsx
     }
 }
 
-// ---- crop card --------------------------------------------------------------
+// ---- selected-area soil profile --------------------------------------------
 
-$soil-good: $accent;
-$soil-bad: #e34948;
-$soil-bad-text: #b91c1c;
+.soil-profile {
+    flex: none;
+    margin-top: 12px;
+    padding: 10px 12px;
+    border: 1px solid $page-border;
+    border-radius: $radius;
+    background-color: $page-card;
+    box-shadow: $shadow-light;
+    color: $page-text;
+    font-size: 12px;
+}
+
+.soil-profile-header {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    margin-bottom: 8px;
+
+    h2 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+    }
+
+    span {
+        color: $page-muted;
+    }
+
+    a {
+        color: inherit;
+    }
+}
+
+.soil-profile-status,
+.soil-profile-note {
+    margin: 6px 0 0;
+    color: $page-muted;
+}
+
+.soil-profile-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    color: $danger-strong;
+
+    button {
+        @include button-reset;
+        @include focus-ring($accent);
+        color: $accent;
+        font-weight: 600;
+    }
+}
+
+.soil-profile-table-wrap {
+    max-height: 150px;
+    overflow: auto;
+}
+
+.soil-profile-table {
+    width: 100%;
+    min-width: 700px;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+
+    th,
+    td {
+        padding: 3px 8px;
+        border-bottom: 1px solid $page-border;
+        text-align: right;
+        white-space: nowrap;
+    }
+
+    thead th {
+        position: sticky;
+        top: 0;
+        background-color: $page-card;
+        color: $page-muted;
+        font-weight: 500;
+    }
+
+    th:first-child {
+        position: sticky;
+        left: 0;
+        z-index: 1;
+        background-color: $page-card;
+        text-align: left;
+    }
+
+    tbody th {
+        font-weight: 500;
+
+        span {
+            margin-left: 5px;
+            color: $page-muted;
+            font-weight: 400;
+        }
+    }
+}
+
+// ---- crop card --------------------------------------------------------------
 
 .crop-head {
     display: flex;
@@ -249,7 +348,7 @@ $soil-bad-text: #b91c1c;
 
 .crop-stats {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     gap: 10px;
 }
 
@@ -297,91 +396,6 @@ $soil-bad-text: #b91c1c;
     white-space: nowrap;
     font-size: 15px;
     font-weight: 600;
-}
-
-.soil-impact {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    font-weight: 400;
-}
-
-.soil-components {
-    display: grid;
-    gap: 2px;
-    line-height: 16px;
-    margin: 0;
-    font-size: 12px;
-
-    > div {
-        display: grid;
-        grid-template-columns: 1fr 112px;
-        align-items: center;
-        gap: 8px;
-    }
-
-    dt {
-        color: $page-muted;
-    }
-
-    dd {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin: 0;
-    }
-}
-
-.component-track {
-    flex: 1;
-    height: 6px;
-    border-radius: 2px;
-    background-color: #f1f5f9;
-    overflow: hidden;
-
-    span {
-        display: block;
-        height: 100%;
-        border-radius: 2px;
-        background-color: $soil-good;
-    }
-
-    // harm grows from the right so it reads as "taking away"
-    &.negative {
-        display: flex;
-        justify-content: flex-end;
-
-        span {
-            background-color: $soil-bad;
-        }
-    }
-}
-
-.component-value {
-    width: 26px;
-    text-align: right;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    color: $page-text;
-
-    &.negative {
-        color: $soil-bad-text;
-    }
-}
-
-// clamped so every card fits MIN_CARD_HEIGHT; sits at the bottom of the card
-.soil-note {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    margin: auto 0 0;
-    padding-top: 8px;
-    border-top: 1px solid $page-border;
-    font-size: 12px;
-    line-height: 1.45;
-    color: $page-muted;
 }
 
 // ---- search & filters -------------------------------------------------------

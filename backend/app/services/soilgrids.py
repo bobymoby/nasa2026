@@ -6,6 +6,8 @@ from typing import Any
 import httpx
 
 from app.cache import cached_json
+from shapely.geometry import Polygon
+
 from app.geo import Rect
 
 SOILGRIDS_PROPERTIES_URL = "https://rest.isric.org/soilgrids/v2.0/properties/query"
@@ -31,6 +33,7 @@ PHYSICAL_PROPERTIES = {
     "silt": ("silt", "%"),
     "bdod": ("bulk_density", "kg/dm3"),
 }
+SELECTION_PROPERTIES = {**CHEMISTRY_PROPERTIES, **PHYSICAL_PROPERTIES}
 
 
 class SoilGridsError(RuntimeError):
@@ -209,6 +212,71 @@ def get_soil_physical(rect: Rect) -> dict[str, Any]:
             "a measurement of effective soil depth."
         ),
     }
+
+
+def _field_sample_points(polygons: list[Polygon]) -> list[tuple[float, float]]:
+    points = [
+        (point.y, point.x)
+        for point in (polygon.representative_point() for polygon in polygons)
+    ]
+    if len(points) <= MAX_RECTANGLE_SAMPLES:
+        return points
+    indexes = [
+        round(i * (len(points) - 1) / (MAX_RECTANGLE_SAMPLES - 1))
+        for i in range(MAX_RECTANGLE_SAMPLES)
+    ]
+    return [points[index] for index in indexes]
+
+
+def get_soil_selection(
+    rect: Rect | None = None,
+    polygons: list[Polygon] | None = None,
+) -> dict[str, Any]:
+    """Sample combined SoilGrids chemistry and physical properties for an area."""
+    if rect is not None:
+        points = _rectangle_sample_points(rect)
+        method = "evenly_spaced_grid_points"
+        location = {
+            "top_left": [rect.north, rect.west],
+            "bottom_right": [rect.south, rect.east],
+        }
+        selected_field_count = None
+    elif polygons:
+        points = _field_sample_points(polygons)
+        method = "field_representative_points"
+        location = None
+        selected_field_count = len(polygons)
+    else:
+        raise ValueError("provide a rectangle or at least one field polygon")
+
+    samples = [
+        _cached_properties(lat, lng, tuple(SELECTION_PROPERTIES))
+        for lat, lng in points
+    ]
+    sampling: dict[str, Any] = {
+        "method": method,
+        "sample_count": len(points),
+        "max_sample_count": MAX_RECTANGLE_SAMPLES,
+        "sampled_points": [{"lat": lat, "lng": lng} for lat, lng in points],
+        "aggregation": "arithmetic mean of available point estimates by depth",
+    }
+    if selected_field_count is not None:
+        sampling["selected_field_count"] = selected_field_count
+
+    result = {
+        "source": "ISRIC SoilGrids",
+        "spatial_resolution_m": SOILGRIDS_RESOLUTION_M,
+        "sampling": sampling,
+        "depth_intervals_cm": list(DEPTH_INTERVALS),
+        "properties": _aggregate_properties(samples, SELECTION_PROPERTIES),
+        "note": (
+            "SoilGrids values are modeled estimates at approximately 250 m "
+            "resolution, not measurements from the selected fields."
+        ),
+    }
+    if location is not None:
+        result["location"] = location
+    return result
 
 
 TOPSOIL_DEPTHS = {"0-5cm": 5, "5-15cm": 10, "15-30cm": 15}

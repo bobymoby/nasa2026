@@ -226,32 +226,3 @@ export async function fetchCrops(
     if (!res.ok) throw new Error(`Failed to load crops (${res.status})`)
     return combine(await res.json())
 }
-
-export type SoilImpact = {
-    crop: string
-    score: number | null // 0..100
-    nitrogenAdded: number | null // 0..3
-    organicMatter: number | null // 0..3
-    soilCover: number | null // 0..3
-    soilDisturbance: number | null // -3..0
-    breakCrop: number | null // 0..2
-    removalCompaction: number | null // -2..0
-    family: string | null
-    note: string | null
-}
-
-export type SoilScoredCrop = {
-    id: string // crop_soil_scores key, e.g. "winter_common_soft_wheat"
-    name: string
-    gaezCodes: string[]
-    soil: SoilImpact
-}
-
-export async function fetchSoilScores(
-    signal?: AbortSignal,
-): Promise<SoilScoredCrop[]> {
-    const res = await fetch(`${API_URL}/api/crops/soil-scores`, { signal })
-    if (!res.ok) throw new Error(`Failed to load soil scores (${res.status})`)
-    const data: { crops: SoilScoredCrop[] } = await res.json()
-    return data.crops
-}

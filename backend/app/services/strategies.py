@@ -1,13 +1,16 @@
-"""Mock-data crop rotation generation and multi-objective strategy ranking.
+"""Crop rotation generation and multi-objective strategy ranking."""
 
-The crop profiles are illustrative MVP inputs, not locally validated farm
-budgets or agronomic recommendations.
-"""
-
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from functools import cache
 from itertools import islice, permutations, product
 from typing import Any
 
+from app.services import agronomy, drought
+
+AGRONOMY_CROP_IDS = {
+    "field_pea": "dry_pea",
+}
+DEEP_ROOTING_THRESHOLD_M = 1.2
 
 @dataclass(frozen=True)
 class CropProfile:
@@ -28,6 +31,7 @@ class CropProfile:
     family_gap_positions: int = 1
     role: str = "cash"
     note: str = ""
+    humus_balance_ceq: int | None = None
 
     @property
     def duration_months(self) -> int:
@@ -100,7 +104,7 @@ STRATEGY_PROFILES: dict[str, dict[str, float]] = {
     },
 }
 STRATEGY_NAMES = {
-    "profit_first": ("Profit-focused", "Prioritizes estimated rotation profit."),
+    "profit_first": ("Profit-focused", "Prioritizes estimated rotation gross margin."),
     "soil_builder": ("Soil-building", "Prioritizes legume, cover, and soil-benefit traits."),
     "risk_balanced": ("Risk-balanced", "Favors more resilient crops with lower modeled risk."),
     "water_efficient": ("Water-efficient", "Favors lower water demand and profit per water unit."),
@@ -112,13 +116,73 @@ MAX_FALLOW_MONTHS = 10
 MAX_ROTATIONS = 5000
 
 
-def _crop_profile(value: CropProfile | str | dict[str, Any]) -> CropProfile:
+def _crop_profile(
+    value: CropProfile | str | dict[str, Any],
+    frost: agronomy.Frost | None = None,
+) -> CropProfile:
     if isinstance(value, CropProfile):
-        return value
-    crop_id = value if isinstance(value, str) else value.get("id")
-    if crop_id not in CROP_BY_ID:
-        raise ValueError(f"Unknown crop id: {crop_id}")
-    return CROP_BY_ID[crop_id]
+        profile = value
+    else:
+        crop_id = value if isinstance(value, str) else value.get("id")
+        if crop_id not in CROP_BY_ID:
+            raise ValueError(f"Unknown crop id: {crop_id}")
+        profile = CROP_BY_ID[crop_id]
+
+    record = agronomy.crops().get(AGRONOMY_CROP_IDS.get(profile.id, profile.id))
+    if record is None:
+        return profile
+
+    phenology = agronomy.water_crop(record, frost)
+    traits = []
+    if record.n_fix_kg_ha > 0:
+        traits.append("nitrogen_fixing")
+    if record.role == "cover":
+        traits.append("cover")
+    if record.role == "forage":
+        traits.append("forage")
+    if record.root_depth_m >= DEEP_ROOTING_THRESHOLD_M:
+        traits.append("deep_rooting")
+    if record.drought_tolerance == "high":
+        traits.append("drought_tolerant")
+
+    return replace(
+        profile,
+        family="+".join(record.family),
+        sow_month=phenology.sow[0],
+        harvest_month=phenology.harvest[0],
+        traits=tuple(traits),
+        return_gap_positions=max(1, record.min_return_years),
+        role=record.role,
+        note="Calendar and crop traits use the sourced agronomy profile.",
+        humus_balance_ceq=record.humus_ceq,
+    )
+
+
+def crop_et_demand_mm(
+    crop_id: str,
+    et0_monthly_mm: dict[int, float],
+    frost: agronomy.Frost | None = None,
+) -> float | None:
+    record = agronomy.crops().get(AGRONOMY_CROP_IDS.get(crop_id, crop_id))
+    if record is None:
+        return None
+    crop = agronomy.water_crop(record, frost)
+    return drought.reference_crop_et_mm(crop, et0_monthly_mm)
+
+
+@cache
+def _humus_balance_range() -> tuple[int, int]:
+    values = [item.humus_ceq for item in agronomy.crops().values()]
+    return min(values), max(values)
+
+
+def _humus_balance_score(crop: CropProfile) -> float:
+    if crop.humus_balance_ceq is None:
+        return crop.soil_benefit
+    low, high = _humus_balance_range()
+    if high == low:
+        return 50.0
+    return 100 * (crop.humus_balance_ceq - low) / (high - low)
 
 
 def _available(crops: list[CropProfile], territory: dict[str, Any]) -> list[CropProfile]:
@@ -139,9 +203,10 @@ def _available(crops: list[CropProfile], territory: dict[str, Any]) -> list[Crop
 def _rotation_constraint_penalty(
     sequence: tuple[CropProfile, ...],
     history: list[str],
+    frost: agronomy.Frost | None = None,
 ) -> float:
     prior_crops = [
-        (index, CROP_BY_ID[crop_id])
+        (index, _crop_profile(crop_id, frost))
         for index, crop_id in enumerate(history)
         if crop_id in CROP_BY_ID
     ]
@@ -214,7 +279,8 @@ def generate_valid_rotations(
     """
     if years < 1:
         raise ValueError("years must be at least 1")
-    profiles = [_crop_profile(crop) for crop in crops]
+    frost = territory.get("frost")
+    profiles = [_crop_profile(crop, frost) for crop in crops]
     available = _available(profiles, territory)
     if not available:
         return []
@@ -272,7 +338,9 @@ def generate_valid_rotations(
         rotations.append({
             "crop_ids": [crop.id for crop in sequence],
             "schedule": schedule,
-            "rotation_constraint_penalty": _rotation_constraint_penalty(sequence, history),
+            "rotation_constraint_penalty": _rotation_constraint_penalty(
+                sequence, history, frost
+            ),
         })
     return rotations
 
@@ -296,9 +364,13 @@ def _metrics(rotation: dict[str, Any], territory: dict[str, Any]) -> dict[str, A
     )
     profits = territory.get("crop_profit_eur_ha", {})
     profit = sum(profits.get(crop.id, crop.profit_eur_ha) for crop in crops)
-    soil_benefit = sum(crop.soil_benefit for crop in crops) / len(crops)
+    soil_benefit = sum(_humus_balance_score(crop) for crop in crops) / len(crops)
     risk = sum(crop.risk for crop in crops) / len(crops)
-    water = sum(crop.water_demand_mm for crop in crops)
+    water_demands = territory.get("crop_water_demand_mm", {})
+    water = round(sum(
+        water_demands.get(crop.id, crop.water_demand_mm)
+        for crop in crops
+    ))
     rotation_penalty = float(rotation.get("rotation_constraint_penalty", 0.0))
     feasibility = max(
         0.0,
@@ -319,7 +391,7 @@ def _metrics(rotation: dict[str, Any], territory: dict[str, Any]) -> dict[str, A
 
 
 def _baseline_metrics(baseline: list[str], territory: dict[str, Any]) -> dict[str, Any]:
-    crops = [_crop_profile(crop) for crop in baseline]
+    crops = [_crop_profile(crop, territory.get("frost")) for crop in baseline]
     schedule = _schedule(tuple(crops))
     if schedule is None:
         raise ValueError("baseline rotation contains incompatible growing seasons")
@@ -351,10 +423,25 @@ def _to_legacy_shape(
     score: float,
     matched_crops: list[str],
     baseline_metrics: dict[str, Any],
+    territory: dict[str, Any],
 ) -> dict[str, Any]:
     crops: list[CropProfile] = [item["crop"] for item in rotation["schedule"]]
-    soil_score = round(sum(crop.soil_benefit for crop in crops) / len(crops))
+    soil_score = round(metrics["soil_benefit_score"])
     risk_score = round(sum(crop.risk for crop in crops) / len(crops))
+    water_demands = territory.get("crop_water_demand_mm", {})
+    market_prices = territory.get("market_prices", {})
+    priced_crops = sum(
+        1
+        for crop in crops
+        if (
+            price := market_prices.get(
+                {"field_pea": "pea"}.get(crop.id, crop.id)
+            )
+        )
+        and price.get("reference_eur_t") is not None
+    )
+    price_coverage = priced_crops / len(crops)
+    market_score = 1 + round(4 * price_coverage)
     water_level = (
         "low" if metrics["water_demand_mm"] <= 1000
         else "medium" if metrics["water_demand_mm"] <= 1400
@@ -366,7 +453,7 @@ def _to_legacy_shape(
         crop = item["crop"]
         start = (item["start"][0] - 1) * 12 + item["start"][1] - 1
         end = (item["end"][0] - 1) * 12 + item["end"][1] - 1
-        monthly = crop.water_demand_mm / (end - start + 1)
+        monthly = water_demands.get(crop.id, crop.water_demand_mm) / (end - start + 1)
         for month_index in range(start, end + 1):
             by_year[month_index // 12] += monthly
 
@@ -387,7 +474,7 @@ def _to_legacy_shape(
                 "role": crop.role,
                 "start": {"year": item["start"][0], "month": item["start"][1]},
                 "end": {"year": item["end"][0], "month": item["end"][1]},
-                "water_use_mm": crop.water_demand_mm,
+                "water_use_mm": round(water_demands.get(crop.id, crop.water_demand_mm)),
                 "traits": list(crop.traits),
                 "note": crop.note or "Illustrative mock crop profile.",
             }
@@ -395,19 +482,32 @@ def _to_legacy_shape(
         ],
         "ratings": {
             "nutrient_cycling": {"score": _rating(crops, "nitrogen_fixing"), "summary": "Mock rating based on legume presence."},
-            "organic_matter": {"score": _scale_rating(soil_score), "summary": "Mock rating based on residue and cover traits."},
+            "organic_matter": {"score": _scale_rating(soil_score), "summary": "Relative humus-balance estimate from the crop agronomy table where mapped."},
             "pest_disruption": {"score": _scale_rating(100 - risk_score), "summary": "Mock rating based on the crop risk profiles."},
             "forage_potential": {"score": _rating(crops, "forage"), "summary": "Mock rating; none of these crops is modeled as a forage crop."},
-            "market": {"score": 3, "summary": "Market access and prices are not modeled."},
-            "soil_improvement": {"score": _scale_rating(soil_score), "summary": "Mock rating based on soil-benefit profiles."},
+            "market": {
+                "score": market_score,
+                "summary": (
+                    f"Country reference prices are available for {priced_crops} of "
+                    f"{len(crops)} crop plantings; this does not measure buyer access."
+                ),
+            },
+            "soil_improvement": {"score": _scale_rating(soil_score), "summary": "Relative humus-balance estimate from the crop agronomy table where mapped."},
         },
         "erosion_risk": {
-            "level": "low" if soil_score >= 65 else "medium" if soil_score >= 45 else "high",
-            "summary": "Illustrative risk proxy; not a measured erosion forecast.",
+            "level": "unknown",
+            "summary": (
+                "Not assessed: soil erodibility and slope alone do not quantify "
+                "erosion under a proposed crop-management sequence."
+            ),
         },
         "water_use": {
             "level": water_level,
-            "summary": "Modeled crop water demand from illustrative profiles.",
+            "summary": (
+                "Seasonal crop water demand estimated from FAO-56 coefficients and ERA5 normals."
+                if water_demands
+                else "Modeled crop water demand from illustrative profiles."
+            ),
             "by_year_mm": [round(value) for value in by_year],
         },
         "crop_roles": {
@@ -443,7 +543,13 @@ def _rating(crops: list[CropProfile], trait: str) -> int:
 def _role_assessment(crops: list[CropProfile], trait: str) -> dict[str, str]:
     share = sum(trait in crop.traits for crop in crops) / len(crops)
     level = "high" if share >= 2 / 3 else "medium" if share > 0 else "low"
-    return {"level": level, "summary": f"{sum(trait in crop.traits for crop in crops)} of {len(crops)} crops have this modeled trait."}
+    return {
+        "level": level,
+        "summary": (
+            f"{sum(trait in crop.traits for crop in crops)} of {len(crops)} crops "
+            "have this modeled trait; crop agronomy data are used where available."
+        ),
+    }
 
 
 def _explanations(metrics: dict[str, Any], baseline: dict[str, Any], crops: list[CropProfile]) -> list[str]:
@@ -464,7 +570,7 @@ def _explanations(metrics: dict[str, Any], baseline: dict[str, Any], crops: list
     traits = sorted({trait for crop in crops for trait in crop.traits})
     if traits:
         explanations.append("Rotation traits: " + ", ".join(traits) + ".")
-    explanations.append("All values are illustrative mock estimates, not farm-specific predictions.")
+    explanations.append("All values are estimates, not farm-specific predictions.")
     return explanations
 
 
@@ -507,6 +613,7 @@ def rank_rotation_strategies(
                 for component in COMPONENTS
             }
     used_rotations: set[tuple[str, ...]] = set()
+    used_compositions: set[tuple[str, ...]] = set()
     strategies = []
     for strategy_type, default_weights in profiles.items():
         weights = default_weights
@@ -534,12 +641,26 @@ def rank_rotation_strategies(
             ),
         )
         selected = next(
-            (index for index in ordered if tuple(rotations[index]["crop_ids"]) not in used_rotations),
-            ordered[0],
+            (
+                index for index in ordered
+                if tuple(sorted(rotations[index]["crop_ids"])) not in used_compositions
+            ),
+            None,
         )
+        if selected is None:
+            selected = next(
+                (
+                    index for index in ordered
+                    if tuple(rotations[index]["crop_ids"]) not in used_rotations
+                ),
+                ordered[0],
+            )
         rotation_key = tuple(rotations[selected]["crop_ids"])
+        composition_key = tuple(sorted(rotation_key))
         reused_rotation = rotation_key in used_rotations
+        reused_composition = composition_key in used_compositions
         used_rotations.add(rotation_key)
+        used_compositions.add(composition_key)
         metrics = metric_list[selected]
         preferred = set(territory.get("preferred_crops", ()))
         matched = sorted(preferred.intersection(rotations[selected]["crop_ids"]))
@@ -553,13 +674,17 @@ def rank_rotation_strategies(
         }
         strategy = _to_legacy_shape(
             rotations[selected], metrics, strategy_type, len(strategies) + 1,
-            scores[selected], matched, baseline_metrics,
+            scores[selected], matched, baseline_metrics, territory,
         )
         strategy["name"] = name
         strategy["summary"] = summary
         strategy["explanations"].insert(
             0, f"Selected using the {strategy_type.replace('_', ' ')} weighted scoring profile."
         )
+        if not reused_composition:
+            strategy["explanations"].append(
+                "A distinct crop mix was chosen to make this strategy's trade-offs clearer."
+            )
         if reused_rotation:
             strategy["explanations"].append(
                 "no distinct sequence remained for this strategy type; the highest-scoring "

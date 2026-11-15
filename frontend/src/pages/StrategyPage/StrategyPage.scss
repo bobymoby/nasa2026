@@ -17,6 +17,7 @@ $status: (
     low: (#ecfdf5, #047857),
     medium: (#fffbeb, #b45309),
     high: (#fef2f2, #b91c1c),
+    unknown: (#f1f5f9, #475569),
 );
 
 @mixin card {
@@ -98,6 +99,33 @@ $status: (
     color: #065f46;
     font-size: 12px;
     font-weight: 600;
+}
+
+.strategy-assumptions {
+    align-self: flex-start;
+    margin-top: 12px;
+    padding: 10px 12px;
+    border: 1px solid $page-border;
+    border-radius: $radius;
+    background-color: $page-card;
+    color: $page-muted;
+    font-size: 13px;
+
+    summary {
+        color: $page-text;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    ul {
+        margin: 10px 0 0;
+        padding-left: 20px;
+        line-height: 1.5;
+    }
+
+    li + li {
+        margin-top: 4px;
+    }
 }
 
 .strategy-error {
@@ -200,11 +228,8 @@ $status: (
     margin-top: 4px;
     font-size: 12px;
     font-weight: 500;
+    line-height: 1.35;
     color: $accent-strong;
-
-    &.none {
-        color: $page-muted;
-    }
 }
 
 // ---- detail -----------------------------------------------------------------
