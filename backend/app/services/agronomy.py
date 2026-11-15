@@ -204,7 +204,14 @@ def season(crop: AgronomyCrop, calendar: Calendar | None) -> tuple[date, tuple[i
         sow = date(REFERENCE_YEAR, 1, 1) + timedelta(days=planting - 1)
         return sow, _scaled(crop.stage_lengths, (maturity - planting) % 365)
     frost = calendar.frost if calendar is not None else None
-    return crop.sow_day + timedelta(days=sowing_shift_days(crop, frost)), crop.stage_lengths
+    sow = crop.sow_day + timedelta(days=sowing_shift_days(crop, frost))
+    lengths = list(crop.stage_lengths)
+    if crop.winter:
+        # winter dormancy absorbs a shifted sowing; harvest stays in the table's window
+        harvest = sow + timedelta(days=sum(lengths))
+        anchored = min(max(harvest, _ref(crop.harvest_start)), _ref(crop.harvest_end))
+        lengths[0] = max(1, lengths[0] + (anchored - harvest).days)
+    return sow, tuple(lengths)
 
 
 def water_crop(crop: AgronomyCrop | str, calendar: Calendar | None = None) -> drought.Crop:

@@ -342,7 +342,8 @@ def _shared(key: tuple, fn, *args):
             _shared_futures.pop(key, None)
 
 
-def _climate(rect: Rect) -> dict:
+def climate_normals(rect: Rect) -> dict:
+    """ERA5 normals for CLIMATE_YEARS: frost dates and monthly mean temperature, precipitation and ET₀."""
     start, end = date(CLIMATE_YEARS[0], 1, 1), date(CLIMATE_YEARS[1], 12, 31)
     series = era5_daily(rect, start, end)
     et0 = et0_series(series)
@@ -442,7 +443,7 @@ def site_context(sh: SentinelHub, outlines: list[tuple[str | None, list[tuple[fl
             for pid, pts in outlines
         ]
         rect = Rect(union_n, union_w, union_s, union_e)
-        climate = _pool.submit(guarded, "climate", _shared, ("climate", *rect.bbox), _climate, rect)
+        climate = _pool.submit(guarded, "climate", _shared, ("climate", *rect.bbox), climate_normals, rect)
         suitability = _pool.submit(guarded, "gaez", _gaez, polys)
         price = _pool.submit(guarded, "prices", _prices, country) if country else None
 

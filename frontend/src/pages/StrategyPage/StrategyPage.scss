@@ -14,10 +14,22 @@ $role-colors: (
 
 // status colours for risk levels, always shown with an icon and a word
 $status: (
-    low: (#ecfdf5, #047857),
-    medium: (#fffbeb, #b45309),
-    high: (#fef2f2, #b91c1c),
-    unknown: (#f1f5f9, #475569),
+    low: (
+        #ecfdf5,
+        #047857,
+    ),
+    medium: (
+        #fffbeb,
+        #b45309,
+    ),
+    high: (
+        #fef2f2,
+        #b91c1c,
+    ),
+    unknown: (
+        #f1f5f9,
+        #475569,
+    ),
 );
 
 @mixin card {
@@ -35,7 +47,11 @@ $status: (
     // centres the content column without a wrapper element
     padding: 40px max(16px, calc((100% - #{$content-width}) / 2)) 80px;
     background:
-        radial-gradient(1200px 420px at 50% -10%, rgb(16 185 129 / 12%), transparent 70%),
+        radial-gradient(
+            1200px 420px at 50% -10%,
+            rgb(16 185 129 / 12%),
+            transparent 70%
+        ),
         $page-bg;
     color: $page-text;
     font-family: $font-sans;
@@ -101,33 +117,6 @@ $status: (
     font-weight: 600;
 }
 
-.strategy-assumptions {
-    align-self: flex-start;
-    margin-top: 12px;
-    padding: 10px 12px;
-    border: 1px solid $page-border;
-    border-radius: $radius;
-    background-color: $page-card;
-    color: $page-muted;
-    font-size: 13px;
-
-    summary {
-        color: $page-text;
-        font-weight: 600;
-        cursor: pointer;
-    }
-
-    ul {
-        margin: 10px 0 0;
-        padding-left: 20px;
-        line-height: 1.5;
-    }
-
-    li + li {
-        margin-top: 4px;
-    }
-}
-
 .strategy-error {
     display: flex;
     align-items: center;
@@ -170,7 +159,12 @@ $status: (
     div {
         height: 96px;
         border-radius: $radius;
-        background: linear-gradient(90deg, #eef0ec 0%, #f8f9f7 50%, #eef0ec 100%);
+        background: linear-gradient(
+            90deg,
+            #eef0ec 0%,
+            #f8f9f7 50%,
+            #eef0ec 100%
+        );
         background-size: 200% 100%;
         animation: strategy-shimmer 1.6s linear infinite;
     }
@@ -213,9 +207,25 @@ $status: (
 }
 
 .option-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-size: 14px;
     font-weight: 600;
     line-height: 1.3;
+}
+
+.strategy-option.current:not(.selected) {
+    border-style: dashed;
+}
+
+.option-current {
+    padding: 1px 7px;
+    border-radius: $radius-pill;
+    background-color: #f1f5f9;
+    color: $page-muted;
+    font-size: 11px;
+    font-weight: 600;
 }
 
 .option-meta {
@@ -228,8 +238,11 @@ $status: (
     margin-top: 4px;
     font-size: 12px;
     font-weight: 500;
-    line-height: 1.35;
     color: $accent-strong;
+
+    &.none {
+        color: $page-muted;
+    }
 }
 
 // ---- detail -----------------------------------------------------------------
@@ -526,6 +539,12 @@ $year-column: 64px;
 
 $water-height: 180px;
 $water-axis: 56px;
+
+.water-unknown {
+    margin: 0;
+    font-size: 13px;
+    color: $page-muted;
+}
 
 .water-chart {
     max-width: 640px;
@@ -1017,6 +1036,17 @@ $profit-height: 170px;
     vertical-align: middle;
 }
 
+.economics-warning {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border: 1px solid rgb(251 191 36 / 45%);
+    border-radius: $radius-sm;
+    background: rgb(251 191 36 / 12%);
+    font-size: 13px;
+    line-height: 1.5;
+    color: $page-text;
+}
+
 .economics-note {
     margin: 12px 0 0;
     font-size: 12px;
@@ -1056,11 +1086,40 @@ $profit-height: 170px;
     }
 }
 
-.rotation-risk-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin: 8px 0 0;
+.rotation-risk-grid {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+.risk-causes {
+    margin: 0;
     padding: 0;
     list-style: none;
+
+    li + li {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px dashed $page-border;
+    }
+}
+
+.risk-crops {
+    display: block;
+    margin-top: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    color: $page-text;
+
+    small {
+        font-weight: 500;
+        color: $page-muted;
+    }
+}
+
+.rotation-risk-card .risk-causes p {
+    margin-top: 4px;
+}
+
+.risk-mitigation strong {
+    color: $page-text;
+    font-weight: 600;
 }

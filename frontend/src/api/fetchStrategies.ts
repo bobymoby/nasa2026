@@ -76,6 +76,13 @@ export type Economics = {
 
 export type Strategy = {
     id: string
+    strategyType:
+        | "current"
+        | "revenue_first"
+        | "soil_builder"
+        | "risk_balanced"
+        | "water_efficient"
+        | "balanced"
     name: string
     summary: string
     durationYears: number
@@ -108,9 +115,11 @@ export type StrategiesResult = {
     strategies: Strategy[]
 }
 
+// currentCrops (planting order) come back first as the "current" strategy
 export async function fetchStrategies(
     selection: AreaSelection,
     crops: string[],
+    currentCrops: string[],
     signal?: AbortSignal,
 ): Promise<StrategiesResult> {
     const area = areaBody(selection)
@@ -176,6 +185,7 @@ export async function fetchStrategies(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             crops,
+            currentCrops,
             ...area,
             siteContext,
         }),

@@ -16,8 +16,11 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["strategies"])
 
-StrategyType = Literal[
+WeightedStrategyType = Literal[
     "revenue_first", "soil_builder", "risk_balanced", "water_efficient", "balanced"
+]
+StrategyType = Literal[
+    "current", "revenue_first", "soil_builder", "risk_balanced", "water_efficient", "balanced"
 ]
 
 
@@ -66,6 +69,11 @@ class AreaRequest(CamelModel):
 
 class StrategiesRequest(AreaRequest):
     crops: list[str] = Field(default_factory=list, max_length=50)
+    current_crops: list[str] = Field(
+        default_factory=list,
+        max_length=8,
+        description="Crops grown now, in planting order; returned first as the current rotation.",
+    )
     years: int = Field(default=3, ge=2, le=5)
     available_crops: list[str] | None = Field(default=None, min_length=1, max_length=8)
     previously_planted: list[str] = Field(default_factory=list, max_length=20)
@@ -77,7 +85,7 @@ class StrategiesRequest(AreaRequest):
     )
     irrigation_available: bool = False
     baseline_rotation: list[str] | None = Field(default=None, min_length=2, max_length=5)
-    strategy_weights: dict[StrategyType, StrategyWeights] | None = None
+    strategy_weights: dict[WeightedStrategyType, StrategyWeights] | None = None
     site_context: dict[str, Any]
 
     @model_validator(mode="after")
@@ -320,7 +328,8 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
     pool = [c for c in _plannable(market) if c in suitability]
 
     selected = list(dict.fromkeys(request.crops or request.available_crops or []))
-    missing = [c for c in selected if c not in pool]
+    current_crops = list(dict.fromkeys(request.current_crops))
+    missing = [c for c in dict.fromkeys(selected + current_crops) if c not in pool]
     if missing:
         raise HTTPException(
             422,
@@ -372,6 +381,9 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
         ranked += svc.rank_rotation_strategies(
             balanced_rotations, territory, strategy_types=["balanced"],
         )
+        current = svc.current_strategy(current_crops, territory)
+        if current:
+            ranked.insert(0, current)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     if not ranked:
@@ -397,6 +409,11 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
             "Income risk is the year-to-year variation of national yields and prices over the last 10 years.",
             "No cost data exists, so costs and profit are not shown; revenue is gross output per hectare.",
             "Erosion risk is not assessed.",
+            *(
+                ["Your current crops could not be scheduled as one rotation, so it is not shown."]
+                if current_crops and not current
+                else []
+            ),
         ],
         strategies=[{**s, "economics": _economics(s, area_ha, market)} for s in ranked],
     )

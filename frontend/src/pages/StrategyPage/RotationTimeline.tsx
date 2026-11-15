@@ -95,8 +95,10 @@ function RotationTimeline({
                                             className={[
                                                 "rotation-bar",
                                                 `role-${s.planting.role}`,
-                                                s.continuesBefore && "cont-before",
-                                                s.continuesAfter && "cont-after",
+                                                s.continuesBefore &&
+                                                    "cont-before",
+                                                s.continuesAfter &&
+                                                    "cont-after",
                                                 isHovered && "hovered",
                                                 hover && !isHovered && "dimmed",
                                             ]
@@ -111,7 +113,9 @@ function RotationTimeline({
                                             }
                                         >
                                             {months >= 2 && (
-                                                <span>{s.planting.cropName}</span>
+                                                <span>
+                                                    {s.planting.cropName}
+                                                </span>
                                             )}
                                         </div>
                                     )
@@ -135,7 +139,9 @@ function RotationTimeline({
                         {formatMonth(hover.planting.start)} →{" "}
                         {formatMonth(hover.planting.end)}
                     </div>
-                    <div>{hover.planting.waterUseMm} mm water</div>
+                    {hover.planting.waterUseMm != null && (
+                        <div>{hover.planting.waterUseMm} mm water</div>
+                    )}
                     {hover.planting.traits.length > 0 && (
                         <div className="chart-tooltip-muted">
                             {hover.planting.traits

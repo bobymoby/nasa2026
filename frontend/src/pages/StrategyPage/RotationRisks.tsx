@@ -18,7 +18,8 @@ const ISSUE_LABELS: Record<RotationIssueKind, string> = {
 
 // crop ids in planting order, the sequence the risks are checked for
 export function plantingSequence(plantings: Planting[]): string[] {
-    return [...plantings]
+    return plantings
+        .filter((p) => p.role !== "cover")
         .sort(
             (a, b) =>
                 a.start.year - b.start.year || a.start.month - b.start.month,

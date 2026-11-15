@@ -9,6 +9,7 @@ import StrategyPage from "./pages/StrategyPage/StrategyPage"
 export default function AppRouter() {
     const [bounds, setBounds] = useState<Bounds | null>(null)
     const [selectedCrops, setSelectedCrops] = useState<string[]>([])
+    const [currentCrops, setCurrentCrops] = useState<string[]>([])
     const [selectedFields, setSelectedFields] = useState<Field[]>([])
 
     // the crops page gets one or the other, so drawing a rectangle drops the
@@ -61,12 +62,42 @@ export default function AppRouter() {
                 element={
                     selection ? (
                         <CropsPage
+                            key="crops"
                             selection={selection}
                             selectedCrops={selectedCrops}
                             onSelectedCropsChange={setSelectedCrops}
+                            next={{
+                                to: "/current",
+                                label: "Build strategies →",
+                            }}
                         />
                     ) : (
                         <Navigate to="/" replace />
+                    )
+                }
+            />
+            <Route
+                path="/current"
+                element={
+                    !selection ? (
+                        <Navigate to="/" replace />
+                    ) : selectedCrops.length === 0 ? (
+                        <Navigate to="/crops" replace />
+                    ) : (
+                        <CropsPage
+                            key="current"
+                            selection={selection}
+                            selectedCrops={currentCrops}
+                            onSelectedCropsChange={setCurrentCrops}
+                            title="Your current rotation"
+                            intro="Pick the crops you grow now, in the order you plant them. Your current rotation is shown first, so you can compare it with the new strategies."
+                            back={{ to: "/crops", label: "← Back to crops" }}
+                            next={{
+                                to: "/strategy",
+                                label: "Build strategies →",
+                                emptyLabel: "Skip, build strategies →",
+                            }}
+                        />
                     )
                 }
             />
@@ -81,6 +112,7 @@ export default function AppRouter() {
                         <StrategyPage
                             selection={selection}
                             crops={selectedCrops}
+                            currentCrops={currentCrops}
                         />
                     )
                 }

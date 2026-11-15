@@ -1,8 +1,18 @@
 import { Level, MonthRef, PlantingRole, Trait } from "../../api/fetchStrategies"
 
 export const MONTHS = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
 ]
 
 export const ROLE_LABELS: Record<PlantingRole, string> = {
@@ -22,7 +32,7 @@ export const LEVEL_LABELS: Record<Level, string> = {
     low: "Low",
     medium: "Medium",
     high: "High",
-    unknown: "Not assessed",
+    unknown: "Unknown",
 }
 
 export function formatMonth({ year, month }: MonthRef): string {
