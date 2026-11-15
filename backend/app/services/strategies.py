@@ -72,7 +72,7 @@ def _profile(
     suitability: float | None = None,
     risk: float | None = None,
 ) -> CropProfile:
-    phenology = agronomy.water_crop(record, frost)
+    phenology = agronomy.water_crop(record, agronomy.Calendar(frost))
     traits = []
     if record.n_fix_kg_ha > 0:
         traits.append("nitrogen_fixing")

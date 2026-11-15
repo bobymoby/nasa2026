@@ -98,7 +98,10 @@ function averageScore(s: Strategy): number {
 }
 
 function revenuePerHaYear(strategy: Strategy): number {
-    return strategy.economics.revenuePerHaYear
+    return (
+        strategy.economics.revenuePerHaYear ??
+        strategy.economics.perHa.revenue / strategy.durationYears
+    )
 }
 
 function StrategyDetail({
@@ -471,6 +474,12 @@ function StrategyPage({ selection, crops, plannedCrops }: Props) {
                                     )}
                                     {s.rotation.map(humanize).join(" → ")}
                                 </span>
+                                {s.addedCrops.length > 0 && (
+                                    <span className="option-added">
+                                        Adds{" "}
+                                        {s.addedCrops.map(humanize).join(", ")}
+                                    </span>
+                                )}
                             </button>
                         ))}
                     </div>

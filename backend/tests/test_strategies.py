@@ -406,7 +406,7 @@ class SourcedProfileTests(unittest.TestCase):
         self.assertEqual(wheat.risk, 30.0)
         self.assertEqual(
             wheat.water_demand_mm,
-            round(drought.seasonal_etc_mm(agronomy.water_crop("wheat", territory["frost"]), FAKE_ET0)),
+            round(drought.seasonal_etc_mm(agronomy.water_crop("wheat", agronomy.Calendar(territory["frost"])), FAKE_ET0)),
         )
         self.assertLess(wheat.sow_month, CROP_BY_ID["wheat"].sow_month)
         self.assertTrue(any(c.role == "cover" for c in profiles(territory).values()))
