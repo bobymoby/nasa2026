@@ -5,7 +5,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
+<<<<<<< HEAD
+from app.services.rotation_risks import CROPS as ROTATION_CROPS
+from app.services.rotation_risks import rotation_risks
+=======
 from app.services.crop_soil_scores import GAEZ_SOIL_CROPS, all_soil_scores
+>>>>>>> 1124dd1a87c369223a3813e8956edc7d4bb064e4
 from app.services.crop_suitability import (
     ClimateFeatures,
     SoilFeatures,
@@ -233,3 +238,53 @@ def crops_suitable(request: SuitabilityRequest) -> SuitabilityResponse:
         for r in results
     ]
     return SuitabilityResponse(texture=texture, count=len(crops), crops=crops)
+
+
+# ------------------------------------------------------------ rotation risks
+
+
+class RotationRequest(CamelModel):
+    crops: list[str] = Field(
+        min_length=1,
+        max_length=50,
+        description="Crop ids in planting order, e.g. [\"sunflower\", \"wheat\"]",
+        examples=[["sunflower", "wheat", "maize"]],
+    )
+
+
+class RotationCause(CamelModel):
+    severity: Literal["medium", "high"]
+    crops: list[str] = Field(description="The crop or crop step causing it")
+    reason: str
+    mitigation: str
+
+
+class RotationIssue(CamelModel):
+    issue: Literal["drought", "heat", "waterlogging", "erosion", "disease_buildup"]
+    severity: Literal["medium", "high"] = Field(description="Worst cause")
+    causes: list[RotationCause]
+
+
+class RotationResponse(CamelModel):
+    issues: list[RotationIssue] = Field(description="Empty = no medium or high risk")
+
+
+@router.post(
+    "/crops/rotation-risks",
+    response_model=RotationResponse,
+    response_model_by_alias=True,
+    summary="Environmental issues a crop sequence makes worse (medium/high only)",
+    description=(
+        "Crops in planting order; returns drought, heat, waterlogging, erosion and "
+        "disease-buildup risks the sequence makes worse. Only medium and high risks "
+        "are listed; an empty list means none. Known crops: "
+        + ", ".join(sorted(ROTATION_CROPS))
+        + "."
+    ),
+)
+def crops_rotation_risks(request: RotationRequest) -> RotationResponse:
+    try:
+        issues = rotation_risks(request.crops)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    return RotationResponse(issues=issues)
