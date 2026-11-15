@@ -44,7 +44,13 @@ Full parameter docs: http://localhost:8000/docs
 | `GET /api/soil/chemistry?top_left=&bottom_right=` | Sampled rectangle mean of SoilGrids pH in water, nitrogen and soil organic carbon by depth                                                                                                                                                                                                                                                                                     |
 | `GET /api/soil/physical?top_left=&bottom_right=`  | Sampled rectangle mean of SoilGrids clay, sand, silt and bulk density by depth                                                                                                                                                                                                                                                                                                |
 | `GET /api/sentinel/soil-characteristics`       | Sentinel Hub Statistical API spectral indicators and historical series                                                                                                                                                                                                                                                                                                             |
-| `POST /api/strategies`                        | Multi-year crop rotation plans for `{"crops": [...], "bounds"\|"fields": ...}` (same area shapes as `/api/crops`), best match first, with timeline, ratings, erosion risk, water use per year, crop-role importance and market notes. **Hard-coded for now** (`app/services/strategies.py`) |
+| `POST /api/strategies`                        | Multi-year crop rotation plans for `{"crops": [...], "bounds"\|"fields": ...}` (same area shapes as `/api/crops`), with five scoring profiles, timeline, ratings, and comparisons. Only selected crops are used; when fewer than five distinct sequences are possible, the best available sequence is reused with an explanation. **Hard-coded mock data for now** (`app/services/strategies.py`) |
+
+Season compatibility, suitability, irrigation, and user crop selection are enforced
+when generating strategy candidates. Repeating crops or closely related crop families
+is allowed but lowers the modeled agronomic-feasibility score via a rotation-gap
+penalty. If no season-compatible candidate remains, the endpoint returns a 422 with
+guidance to select a compatible crop or enable irrigation.
 
 SoilGrids chemistry and physical endpoints use up to five evenly distributed points
 inside the requested rectangle and return the arithmetic mean of available point

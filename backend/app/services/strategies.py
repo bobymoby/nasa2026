@@ -55,6 +55,12 @@ MOCK_CROPS: tuple[CropProfile, ...] = (
                 ("nitrogen_fixing",), requires_irrigation=True),
     CropProfile("field_pea", "Field pea", "legume", 3, 7, 1500, 760, 82, 35, 280, 64,
                 ("nitrogen_fixing", "cover")),
+    CropProfile("oat", "Oat", "cereal", 3, 7, 1320, 700, 48, 40, 350, 70,
+                ("cover",), note="Illustrative spring-sown oat profile."),
+    CropProfile("flax", "Flax", "oilseed", 3, 8, 1700, 980, 54, 52, 420, 62,
+                ("deep_rooting",), note="Illustrative spring-sown flax profile."),
+    CropProfile("buckwheat", "Buckwheat", "pseudocereal", 5, 9, 1550, 780, 68, 42, 320, 66,
+                ("drought_tolerant",), note="Illustrative warm-season buckwheat profile."),
 )
 
 CROP_BY_ID = {crop.id: crop for crop in MOCK_CROPS}
@@ -117,27 +123,40 @@ def _available(crops: list[CropProfile], territory: dict[str, Any]) -> list[Crop
     return available
 
 
-def _family_history_allowed(
+def _rotation_constraint_penalty(
     sequence: tuple[CropProfile, ...],
-    candidate: CropProfile,
     history: list[str],
-    position: int,
-) -> bool:
-    combined_ids = history + [crop.id for crop in sequence]
-    crop_positions = [
-        index for index, crop_id in enumerate(combined_ids)
-        if crop_id == candidate.id
+) -> float:
+    prior_crops = [
+        (index, CROP_BY_ID[crop_id])
+        for index, crop_id in enumerate(history)
+        if crop_id in CROP_BY_ID
     ]
-    family_positions = [
-        index for index, crop_id in enumerate(combined_ids)
-        if crop_id in CROP_BY_ID and CROP_BY_ID[crop_id].family == candidate.family
-    ]
-    current_position = len(history) + position
-    if any(current_position - prior < candidate.return_gap_positions for prior in crop_positions):
-        return False
-    if any(current_position - prior <= candidate.family_gap_positions for prior in family_positions):
-        return False
-    return True
+    penalty = 0.0
+    for position, candidate in enumerate(sequence):
+        current_position = len(history) + position
+        same_crop_positions = [
+            index for index, crop in prior_crops
+            if crop.id == candidate.id
+        ]
+        family_positions = [
+            index for index, crop in prior_crops
+            if crop.family == candidate.family
+        ]
+        for prior_position in same_crop_positions:
+            gap = current_position - prior_position
+            if gap < candidate.return_gap_positions:
+                penalty += 10 * (
+                    candidate.return_gap_positions - gap
+                ) / candidate.return_gap_positions
+        for prior_position in family_positions:
+            gap = current_position - prior_position
+            if gap <= candidate.family_gap_positions:
+                penalty += 5 * (
+                    candidate.family_gap_positions + 1 - gap
+                ) / (candidate.family_gap_positions + 1)
+        prior_crops.append((current_position, candidate))
+    return round(penalty, 2)
 
 
 def _schedule(sequence: tuple[CropProfile, ...]) -> list[dict[str, Any]] | None:
@@ -171,7 +190,7 @@ def generate_valid_rotations(
     crops: list[CropProfile | str | dict[str, Any]],
     years: int = 3,
 ) -> list[dict[str, Any]]:
-    """Enumerate season-compatible crop sequences and enforce rotation gaps.
+    """Enumerate season-compatible crop sequences and score rotation gaps.
 
     ``previously_planted`` is chronological, oldest to newest. A candidate
     crop sequence has one crop event per requested position; calendar dates
@@ -188,17 +207,13 @@ def generate_valid_rotations(
     rotations = []
     for ids in product(available, repeat=years):
         sequence = tuple(ids)
-        if any(
-            not _family_history_allowed(sequence[:position], crop, history, position)
-            for position, crop in enumerate(sequence)
-        ):
-            continue
         schedule = _schedule(sequence)
         if schedule is None:
             continue
         rotations.append({
             "crop_ids": [crop.id for crop in sequence],
             "schedule": schedule,
+            "rotation_constraint_penalty": _rotation_constraint_penalty(sequence, history),
         })
     return rotations
 
@@ -224,7 +239,11 @@ def _metrics(rotation: dict[str, Any], territory: dict[str, Any]) -> dict[str, A
     soil_benefit = sum(crop.soil_benefit for crop in crops) / len(crops)
     risk = sum(crop.risk for crop in crops) / len(crops)
     water = sum(crop.water_demand_mm for crop in crops)
-    feasibility = 0.8 * (sum(scores) / len(scores)) + 20 * preferred_fraction
+    rotation_penalty = float(rotation.get("rotation_constraint_penalty", 0.0))
+    feasibility = max(
+        0.0,
+        0.8 * (sum(scores) / len(scores)) + 20 * preferred_fraction - rotation_penalty,
+    )
     return {
         "profit_eur_ha": round(profit, 2),
         "soil_benefit_score": round(soil_benefit, 2),
@@ -235,6 +254,7 @@ def _metrics(rotation: dict[str, Any], territory: dict[str, Any]) -> dict[str, A
         "feasible": True,
         "suitability_scores": [round(score, 2) for score in scores],
         "preferred_crop_coverage": round(preferred_fraction, 3),
+        "rotation_constraint_penalty": rotation_penalty,
     }
 
 
@@ -391,7 +411,7 @@ def _explanations(metrics: dict[str, Any], baseline: dict[str, Any], crops: list
 def rank_rotation_strategies(
     rotations: list[dict[str, Any]], territory: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """Return one distinct top rotation for each of five strategy objectives."""
+    """Return the top rotation for each strategy objective, reusing when needed."""
     if not rotations:
         return []
     baseline_ids = territory.get("baseline_rotation") or list(DEFAULT_BASELINE)
@@ -445,11 +465,11 @@ def rank_rotation_strategies(
         )
         selected = next(
             (index for index in ordered if tuple(rotations[index]["crop_ids"]) not in used_rotations),
-            None,
+            ordered[0],
         )
-        if selected is None:
-            continue
-        used_rotations.add(tuple(rotations[selected]["crop_ids"]))
+        rotation_key = tuple(rotations[selected]["crop_ids"])
+        reused_rotation = rotation_key in used_rotations
+        used_rotations.add(rotation_key)
         metrics = metric_list[selected]
         preferred = set(territory.get("preferred_crops", ()))
         matched = sorted(preferred.intersection(rotations[selected]["crop_ids"]))
@@ -470,6 +490,11 @@ def rank_rotation_strategies(
         strategy["explanations"].insert(
             0, f"Selected using the {strategy_type.replace('_', ' ')} weighted scoring profile."
         )
+        if reused_rotation:
+            strategy["explanations"].append(
+                "no distinct sequence remained for this strategy type; the highest-scoring "
+                "available sequence is reused."
+            )
         strategy["evaluation"]["water_efficiency_score"] = metrics["water_efficiency_score"]
         strategy["evaluation"]["score_components"] = {
             _camel_key(key): value for key, value in selected_components.items()

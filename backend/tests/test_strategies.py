@@ -83,6 +83,20 @@ class StrategiesEndpointTests(unittest.TestCase):
             )
         )
 
+    def test_supports_oat_flax_and_buckwheat_from_crop_suitability(self):
+        selected = ["oat", "flax", "buckwheat"]
+        response = client.post(
+            "/api/strategies",
+            json={"bounds": BOUNDS, "crops": selected},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        plans = response.json()["strategies"]
+        self.assertEqual(len(plans), 5)
+        self.assertTrue(
+            all(set(plan["rotation"]).issubset(selected) for plan in plans)
+        )
+
     def test_rejects_bad_suitability_and_conflicting_preferences(self):
         body = {
             "bounds": BOUNDS,
@@ -139,17 +153,17 @@ class RotationGenerationTests(unittest.TestCase):
             self.assertNotIn("maize", rotation["crop_ids"])
             self.assertNotIn("soybean", rotation["crop_ids"])
 
-    def test_previous_crop_history_and_family_gaps_are_enforced(self):
+    def test_previous_crop_and_family_repeats_are_penalized(self):
         rotations = generate_valid_rotations(
             {"previously_planted": ["wheat"], "irrigation_available": True},
             list(MOCK_CROPS),
             years=3,
         )
 
-        for rotation in rotations:
-            self.assertNotEqual(rotation["crop_ids"][0], "wheat")
-            for first, second in zip(rotation["crop_ids"], rotation["crop_ids"][1:]):
-                self.assertNotEqual(CROP_BY_ID[first].family, CROP_BY_ID[second].family)
+        self.assertTrue(rotations)
+        self.assertTrue(any(rotation["crop_ids"][0] == "wheat" for rotation in rotations))
+        self.assertTrue(any(rotation["rotation_constraint_penalty"] > 0 for rotation in rotations))
+        self.assertTrue(any(rotation["rotation_constraint_penalty"] == 0 for rotation in rotations))
 
     def test_season_schedule_never_overlaps_and_has_bounded_idle_gaps(self):
         rotations = generate_valid_rotations(
@@ -178,9 +192,39 @@ class RotationGenerationTests(unittest.TestCase):
         ranked = rank_rotation_strategies(rotations, territory)
 
         self.assertEqual(len(ranked), 5)
-        self.assertEqual(len({tuple(strategy["rotation"]) for strategy in ranked}), 5)
+        self.assertGreater(len({tuple(strategy["rotation"]) for strategy in ranked}), 1)
         self.assertTrue(all(strategy["evaluation"]["profit_eur_ha"] for strategy in ranked))
         self.assertTrue(all(strategy["comparison"]["profit_difference_eur_ha"] is not None for strategy in ranked))
+
+    def test_two_selected_crops_still_produce_five_ranked_strategy_types(self):
+        response = client.post(
+            "/api/strategies",
+            json={
+                "bounds": BOUNDS,
+                "crops": ["wheat", "sunflower"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        plans = response.json()["strategies"]
+        self.assertEqual(len(plans), 5)
+        self.assertTrue(
+            all(set(plan["rotation"]).issubset({"wheat", "sunflower"}) for plan in plans)
+        )
+
+    def test_single_selected_crop_returns_ranked_profiles_with_reuse_warning(self):
+        response = client.post(
+            "/api/strategies",
+            json={"bounds": BOUNDS, "crops": ["wheat"]},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        plans = response.json()["strategies"]
+        self.assertEqual(len(plans), 5)
+        self.assertTrue(all(set(plan["rotation"]) == {"wheat"} for plan in plans))
+        self.assertTrue(
+            any("no distinct sequence" in " ".join(plan["explanations"]) for plan in plans)
+        )
 
 
 if __name__ == "__main__":

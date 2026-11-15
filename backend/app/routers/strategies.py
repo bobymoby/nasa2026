@@ -120,6 +120,7 @@ class Evaluation(CamelModel):
     feasible: bool
     suitability_scores: list[float]
     preferred_crop_coverage: float
+    rotation_constraint_penalty: float
     score_components: dict[str, float]
     scoring_weights: dict[str, float]
 
@@ -194,8 +195,11 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
     )
     unknown_crops = set(selected_crop_ids) - set(svc.CROP_BY_ID)
     if unknown_crops:
+        supported_ids = ", ".join(sorted(svc.CROP_BY_ID))
         raise HTTPException(
-            422, f"Unknown selected crop id(s): {', '.join(sorted(unknown_crops))}"
+            422,
+            f"Unknown selected crop id(s): {', '.join(sorted(unknown_crops))}. "
+            f"Supported mock crop IDs: {supported_ids}.",
         )
     try:
         rotations = svc.generate_valid_rotations(
@@ -205,11 +209,12 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
-    if len(ranked) < 5:
+    if not ranked:
         raise HTTPException(
             422,
-            f"Only {len(ranked)} distinct valid rotation(s) remain from the selected "
-            "crops. Select more compatible crops or relax constraints to generate five strategies.",
+            "No season-compatible rotations can be generated from the selected crops "
+            "and current suitability/irrigation constraints. Select another supported "
+            "crop or enable irrigation where appropriate.",
         )
     return StrategiesResponse(
         data_mode="illustrative_mock",
