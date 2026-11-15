@@ -176,21 +176,15 @@ def _kc(crop: Crop, season: int, d: date) -> float:
     return pts[-1][1]
 
 
-def reference_crop_et_mm(
-    crop: Crop,
-    et0_monthly_mm: dict[int, float],
-    season: int = 2024,
-) -> float:
-    """Estimate seasonal ETc from monthly reference-ET normals and crop Kc."""
+def seasonal_etc_mm(crop: Crop, et0_monthly_mm: dict[int, float], season: int = 2023) -> float:
+    """FAO-56 crop water demand over one season: daily Kc × the month's mean daily ET₀."""
     sow, harvest = crop.window(season)
-    total = 0.0
-    day = sow
-    while day <= harvest:
-        days_in_month = calendar.monthrange(day.year, day.month)[1]
-        daily_et0 = et0_monthly_mm[day.month] / days_in_month
-        total += _kc(crop, season, day) * daily_et0
-        day += timedelta(days=1)
-    return round(total, 1)
+    total, d = 0.0, sow
+    while d <= harvest:
+        days = calendar.monthrange(d.year, d.month)[1]
+        total += _kc(crop, season, d) * et0_monthly_mm[d.month] / days
+        d += timedelta(days=1)
+    return total
 
 
 # ---------------------------------------------------------------- bucket

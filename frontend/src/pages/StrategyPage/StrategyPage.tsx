@@ -97,6 +97,13 @@ function averageScore(s: Strategy): number {
     return scores.reduce((a, b) => a + b, 0) / scores.length
 }
 
+function revenuePerHaYear(strategy: Strategy): number {
+    return (
+        strategy.economics.revenuePerHaYear ??
+        strategy.economics.perHa.revenue / strategy.durationYears
+    )
+}
+
 function StrategyDetail({
     strategy,
     risk,
@@ -114,8 +121,7 @@ function StrategyDetail({
                         {strategy.durationYears}-year plan
                     </span>
                     <span className="tag tag-money">
-                        {formatEur(strategy.economics.revenuePerHaYear)}/ha/yr
-                        revenue
+                        {formatEur(revenuePerHaYear(strategy))}/ha/yr revenue
                     </span>
                     <RiskBadge
                         level={strategy.erosionRisk.level}
@@ -176,10 +182,14 @@ function StrategyDetail({
 
             <section>
                 <h3>Water consumption per year</h3>
-                <WaterChart
-                    byYearMm={strategy.waterUse.byYearMm}
-                    plantings={strategy.plantings}
-                />
+                {strategy.waterUse.byYearMm.length > 0 ? (
+                    <WaterChart
+                        byYearMm={strategy.waterUse.byYearMm}
+                        plantings={strategy.plantings}
+                    />
+                ) : (
+                    <p className="water-unknown">{strategy.waterUse.summary}</p>
+                )}
             </section>
 
             <section>
@@ -261,7 +271,7 @@ function ComparisonTable({
                             <th scope="row">{s.name}</th>
                             <td>{s.durationYears}</td>
                             <td className="cell-money">
-                                {formatEur(s.economics.revenuePerHaYear)}
+                                {formatEur(revenuePerHaYear(s))}
                             </td>
                             {RATINGS.map(({ key }) => (
                                 <td key={key}>
@@ -445,7 +455,7 @@ function StrategyPage({ selection, crops, currentCrops }: Props) {
                                     {averageScore(s).toFixed(1)}/5
                                 </span>
                                 <span className="option-profit">
-                                    {formatEur(s.economics.revenuePerHaYear)}
+                                    {formatEur(revenuePerHaYear(s))}
                                     <small> /ha/yr est. revenue</small>
                                 </span>
                                 <span className="option-risk">
@@ -464,6 +474,12 @@ function StrategyPage({ selection, crops, currentCrops }: Props) {
                                     )}
                                     {s.rotation.map(humanize).join(" → ")}
                                 </span>
+                                {s.addedCrops.length > 0 && (
+                                    <span className="option-added">
+                                        Adds{" "}
+                                        {s.addedCrops.map(humanize).join(", ")}
+                                    </span>
+                                )}
                             </button>
                         ))}
                     </div>

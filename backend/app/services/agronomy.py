@@ -181,9 +181,15 @@ def water_crop(crop: AgronomyCrop | str, frost: Frost | None = None) -> drought.
     if isinstance(crop, str):
         crop = crops()[crop]
     sow = crop.sow_day + timedelta(days=sowing_shift_days(crop, frost))
+    lengths = list(crop.stage_lengths)
+    if crop.winter:
+        # winter dormancy absorbs a shifted sowing; harvest stays in the table's window
+        harvest = sow + timedelta(days=sum(lengths))
+        anchored = min(max(harvest, _ref(crop.harvest_start)), _ref(crop.harvest_end))
+        lengths[0] = max(1, lengths[0] + (anchored - harvest).days)
 
     bounds = [sow]
-    for length in crop.stage_lengths:
+    for length in lengths:
         bounds.append(bounds[-1] + timedelta(days=length))
     kcs = (crop.kc_ini, crop.kc_ini, crop.kc_mid, crop.kc_mid, crop.kc_end)
     stages = [

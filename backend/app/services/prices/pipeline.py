@@ -87,6 +87,7 @@ class YieldRef:
     t_ha: float
     years: tuple[int, int]
     source: str
+    # year-to-year variability around the trend, None with too few years
     cv: float | None = None
 
 
@@ -372,21 +373,33 @@ def _sources(names) -> str:
 
 
 def reference_yield(rows: list[tuple[int, float, str]], reference_years: int = REFERENCE_YEARS) -> YieldRef | None:
-    rows = sorted(rows)
-    recent = rows[-reference_years:]
+    recent = sorted(rows)[-reference_years:]
     if not recent:
         return None
-    window = [t for _, t, _ in rows[-VARIABILITY_YEARS:]]
-    cv = (
-        round(statistics.pstdev(window) / statistics.fmean(window), 3)
-        if len(window) >= MIN_VARIABILITY_YEARS else None
-    )
     return YieldRef(
         round(statistics.fmean(t for _, t, _ in recent), 2),
         (recent[0][0], recent[-1][0]),
         _sources(src for _, _, src in recent),
-        cv,
+        detrended_cv([(year, t) for year, t, _ in sorted(rows)[-VARIABILITY_YEARS:]]),
     )
+
+
+def detrended_cv(points: list[tuple[int, float]]) -> float | None:
+    """Spread of the values around their linear trend, relative to their mean.
+
+    Yields rise with breeding and practice; without removing the trend that
+    rise would read as risk.
+    """
+    if len(points) < MIN_VARIABILITY_YEARS:
+        return None
+    xs, ys = [x for x, _ in points], [y for _, y in points]
+    mean_x, mean_y = statistics.fmean(xs), statistics.fmean(ys)
+    if mean_y <= 0:
+        return None
+    sxx = sum((x - mean_x) ** 2 for x in xs)
+    slope = sum((x - mean_x) * (y - mean_y) for x, y in points) / sxx if sxx else 0.0
+    residuals = [y - (mean_y + slope * (x - mean_x)) for x, y in points]
+    return round(statistics.pstdev(residuals) / mean_y, 3)
 
 
 def country_yields(code: str, crop_ids: list[str] | None = None) -> dict[str, YieldRef]:
@@ -430,7 +443,7 @@ def market_reference(code: str, crop_ids: list[str]) -> Market:
         price, ref = prices.get(crop_id, CropMarket()), yields.get(crop_id)
         if ref:
             price = replace(
-                price, yield_t_ha=ref.t_ha, yield_years=ref.years, yield_source=ref.source, yield_cv=ref.cv,
+                price, yield_t_ha=ref.t_ha, yield_years=ref.years, yield_source=ref.source, yield_cv=ref.cv
             )
         if price != CropMarket():
             crops[crop_id] = price
