@@ -4,10 +4,7 @@ import { API_URL } from "./apiUrl"
 export type Level = "low" | "medium" | "high"
 export type PlantingRole = "cash" | "cover" | "forage"
 export type Trait =
-    | "nitrogen_fixing"
-    | "deep_rooting"
-    | "drought_tolerant"
-    | "cover"
+    "nitrogen_fixing" | "deep_rooting" | "drought_tolerant" | "cover"
 
 // rotation year (1-based) and calendar month (1-12)
 export type MonthRef = { year: number; month: number }
@@ -38,8 +35,13 @@ export type Money = {
 // estimates in EUR; perHa is one pass through the rotation
 export type Economics = {
     currency: "EUR"
-    // yield year of the market data used
+    // ISO alpha-2 country whose market figures are used
+    country: string
+    // prices are real euros of this year
     priceYear: number | null
+    // false when a crop lacks a published yield, price or cost estimate and is left out of the totals
+    complete: boolean
+    missingData: string[]
     areaHa: number
     perHa: Money
     profitPerHaYear: number
@@ -48,10 +50,12 @@ export type Economics = {
     plantings: {
         cropName: string
         role: PlantingRole
+        yieldTHa: number | null
+        priceEurT: number | null
         revenue: number
         cost: number
         profit: number
-        // "market <year>", "estimate", "no harvest" or "no price data"
+        // "price eurostat 2020–2024, yield eurostat 2021–2025", "no market data", "no cost estimate" or "no harvest"
         source: string
     }[]
     byYear: { year: number; revenue: number; cost: number; profit: number }[]
@@ -110,11 +114,13 @@ export async function fetchStrategies(
                 detail = body.detail
                     .map((item: { loc?: unknown[]; msg?: string }) => {
                         const location = Array.isArray(item.loc)
-                            ? item.loc.filter((part) => part !== "body").join(".")
+                            ? item.loc
+                                  .filter((part) => part !== "body")
+                                  .join(".")
                             : ""
                         return location
                             ? `${location}: ${item.msg ?? "Invalid value"}`
-                            : item.msg ?? "Invalid request"
+                            : (item.msg ?? "Invalid request")
                     })
                     .join("; ")
             }

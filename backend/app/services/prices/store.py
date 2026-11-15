@@ -1,4 +1,4 @@
-"""Postgres tables for the price pipeline: the crop mapping and each source's raw series.
+"""Postgres tables for the price pipeline: the crop mapping and each source's raw series, yields included.
 
 Every source is stored as it arrives (nominal, in its own unit) with a fetch
 time, so standardising can change without refetching. If the database is
@@ -11,7 +11,7 @@ import time
 from collections.abc import Iterable
 
 from app.db import ensure_table, pool
-from app.services.prices.sources import EurostatPrice, FaoPrice
+from app.services.prices.sources import EurostatPrice, EurostatYield, FaoPrice, FaoYield
 
 log = logging.getLogger("app.prices")
 
@@ -48,6 +48,24 @@ DDL = {
             item_code integer NOT NULL,
             year      integer NOT NULL,
             usd_per_t double precision NOT NULL,
+            flag      text NOT NULL,
+            PRIMARY KEY (m49, item_code, year)
+        )""",
+    "eurostat_crop_yield": """
+        CREATE TABLE IF NOT EXISTS eurostat_crop_yield (
+            geo   text NOT NULL,
+            crops text NOT NULL,
+            year  integer NOT NULL,
+            t_ha  double precision NOT NULL,
+            flag  text,
+            PRIMARY KEY (geo, crops, year)
+        )""",
+    "fao_crop_yield": """
+        CREATE TABLE IF NOT EXISTS fao_crop_yield (
+            m49       integer NOT NULL,
+            item_code integer NOT NULL,
+            year      integer NOT NULL,
+            t_ha      double precision NOT NULL,
             flag      text NOT NULL,
             PRIMARY KEY (m49, item_code, year)
         )""",
@@ -189,6 +207,69 @@ def get_fao(m49: int) -> list[FaoPrice] | None:
         return [FaoPrice(*r) for r in rows]
     except Exception as e:
         _failed("faostat read", e)
+        return None
+
+
+def put_eurostat_yields(geo: str, yields: list[EurostatYield]) -> None:
+    try:
+        _up()
+        with pool.connection(timeout=DB_TIMEOUT) as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM eurostat_crop_yield WHERE geo = %s", (geo,))
+            cur.executemany(
+                "INSERT INTO eurostat_crop_yield (geo, crops, year, t_ha, flag) VALUES (%s, %s, %s, %s, %s)",
+                [(geo, y.crops, y.year, y.t_ha, y.flag) for y in yields],
+            )
+            _mark(cur, "eurostat_yield", geo)
+    except Exception as e:
+        _failed("eurostat yield write", e)
+
+
+def get_eurostat_yields(geo: str) -> list[EurostatYield] | None:
+    try:
+        _up()
+        with pool.connection(timeout=DB_TIMEOUT) as conn:
+            rows = conn.execute(
+                "SELECT crops, year, t_ha, flag FROM eurostat_crop_yield WHERE geo = %s", (geo,)
+            ).fetchall()
+        return [EurostatYield(*r) for r in rows]
+    except Exception as e:
+        _failed("eurostat yield read", e)
+        return None
+
+
+def put_fao_yields(yields: list[FaoYield]) -> None:
+    try:
+        _up()
+        with pool.connection(timeout=DB_TIMEOUT) as conn, conn.cursor() as cur:
+            cur.execute("TRUNCATE fao_crop_yield")
+            with cur.copy("COPY fao_crop_yield (m49, item_code, year, t_ha, flag) FROM STDIN") as copy:
+                for y in yields:
+                    copy.write_row((y.m49, y.item_code, y.year, y.t_ha, y.flag))
+            _mark(cur, "faostat_yield", "bulk")
+    except Exception as e:
+        _failed("faostat yield write", e)
+
+
+def has_fao_yields() -> bool:
+    try:
+        _up()
+        with pool.connection(timeout=DB_TIMEOUT) as conn:
+            return conn.execute("SELECT EXISTS (SELECT 1 FROM fao_crop_yield)").fetchone()[0]
+    except Exception as e:
+        _failed("faostat yield read", e)
+        return False
+
+
+def get_fao_yields(m49: int) -> list[FaoYield] | None:
+    try:
+        _up()
+        with pool.connection(timeout=DB_TIMEOUT) as conn:
+            rows = conn.execute(
+                "SELECT m49, item_code, year, t_ha, flag FROM fao_crop_yield WHERE m49 = %s", (m49,)
+            ).fetchall()
+        return [FaoYield(*r) for r in rows]
+    except Exception as e:
+        _failed("faostat yield read", e)
         return None
 
 

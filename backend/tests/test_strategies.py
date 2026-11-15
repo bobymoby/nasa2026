@@ -1,9 +1,11 @@
 import unittest
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.routers import strategies
+from app.services.prices.pipeline import CropMarket, Market
 from app.services.strategies import (
     CROP_BY_ID,
     MOCK_CROPS,
@@ -14,6 +16,20 @@ from app.services.strategies import (
 app = FastAPI()
 app.include_router(strategies.router, prefix="/api")
 client = TestClient(app)
+
+FAKE_MARKET = Market("BG", 2025, {
+    crop_id: CropMarket(250.0, (2020, 2024), "eurostat", "high", 4.0, (2021, 2025), "eurostat")
+    for crop_id in [*CROP_BY_ID, "dry_pea"]
+})
+_market_patch = patch.object(strategies, "market_reference", lambda country, crop_ids: FAKE_MARKET)
+
+
+def setUpModule():
+    _market_patch.start()
+
+
+def tearDownModule():
+    _market_patch.stop()
 
 BOUNDS = {
     "topLeft": {"lat": 43.5, "lng": 27.1},
