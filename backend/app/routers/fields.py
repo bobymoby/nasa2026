@@ -12,7 +12,7 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Path, Query, Response, status
 from psycopg.rows import dict_row
@@ -34,6 +34,7 @@ from app.services.field_ndvi import (
     shrink,
     shrink_polygon,
 )
+from app.services import gaez
 from app.services.sentinel_hub import SentinelHub, SentinelHubError
 from app.timing import emit, plot_tag, timed
 
@@ -162,7 +163,7 @@ class NdviOptions(BaseModel):
         return list(range(self.from_year, self.to_year + 1))
 
 
-class PlotsRequest(NdviOptions):
+class PlotsInput(BaseModel):
     """Outlines as plain [lat, lon] lists (`plots`), the frontend's picked
     fields (`fields`, same shape as /api/crops/fields), or both.
 
@@ -184,7 +185,7 @@ class PlotsRequest(NdviOptions):
     )
 
     @model_validator(mode="after")
-    def check_count(self) -> "PlotsRequest":
+    def check_count(self) -> "PlotsInput":
         n = len(self.plots) + len(self.fields)
         if n == 0:
             raise ValueError("send at least one outline in `plots` or `fields`")
@@ -198,6 +199,10 @@ class PlotsRequest(NdviOptions):
         return [(None, [as_pair(p) for p in pts]) for pts in self.plots] + [
             (f.id, [(p.lat, p.lng) for p in f.polygon]) for f in self.fields
         ]
+
+
+class PlotsRequest(NdviOptions, PlotsInput):
+    """POST /ndvi body: the plots plus the NDVI options."""
 
 
 def _cache_key(kind: str, ident: str, buffer_m: float) -> str:
@@ -323,6 +328,78 @@ def plots_ndvi_prefetch(sh: Client, req: PlotsRequest) -> dict:
     for plot_id, points in req.outlines():
         _prefetch_pool.submit(contextvars.copy_context().run, warm, plot_id, points)
     return {"queued": len(req.outlines()), "years": [years[0], years[-1]]}
+
+
+# ----------------------------------------------------------- crop suitability
+
+SuitabilityClass = Literal[tuple(gaez.CLASS_NAMES)]  # type: ignore[valid-type]
+CropGroup = Literal[tuple(gaez.CROP_GROUP_NAMES)]  # type: ignore[valid-type]
+
+
+class SuitabilityRequest(PlotsInput):
+    """Same plots as POST /ndvi, plus which crops to list."""
+
+    input_level: Literal["high", "low"] = Field(
+        "high", description="GAEZ input level: high = mechanised, fertilised; low = traditional"
+    )
+    min_class: SuitabilityClass = Field(
+        "medium", description="Leave out crops rated below this GAEZ class"
+    )
+    groups: list[CropGroup] | None = Field(
+        None, description="Only these crop groups (e.g. cereal, oilseed); all when omitted"
+    )
+
+
+def _plot_cells(req: PlotsInput) -> tuple[list[dict], list[tuple[int, gaez.Cell]]]:
+    out, cells = [], []
+    for plot_id, points in req.outlines():
+        head = {"id": plot_id} if plot_id is not None else {}
+        try:
+            point = plot_polygon(points).representative_point()
+        except ValueError as e:
+            out.append({**head, "crops": [], "error": str(e)})
+            continue
+        cells.append((len(out), gaez.Cell.at(point.y, point.x)))
+        out.append(head)
+    return out, cells
+
+
+@router.post(
+    "/suitability",
+    summary="Several plots: crops suited to each, best first (FAO GAEZ v4)",
+)
+def plots_suitability(req: SuitabilityRequest) -> list[dict]:
+    """Rainfed suitability for the 1981-2010 climate, one list per plot in input
+    order. GAEZ cells are ~9 km, so plots in the same cell get the same list."""
+    out, cells = _plot_cells(req)
+    with timed("POST /fields/suitability", logging.INFO, plots=len(out), input_level=req.input_level):
+        values = gaez.cells_values(req.input_level, {c for _, c in cells})
+        groups = set(req.groups) if req.groups else None
+        for i, cell in cells:
+            lat, lon = cell.center
+            got = values[cell]
+            body: dict = {
+                "cell": {"lat": round(lat, 4), "lng": round(lon, 4), "size_km": gaez.CELL_KM},
+                "crops": [],
+            }
+            if isinstance(got, gaez.GaezError):
+                body["error"] = str(got)
+            elif not got:
+                body["error"] = "GAEZ has no data here (sea or outside its land mask)"
+            else:
+                body["crops"] = gaez.crop_list(req.input_level, got, req.min_class, groups)
+            out[i] = {**out[i], **body}
+    return out
+
+
+@router.post(
+    "/suitability/prefetch",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Warm the GAEZ tiles under these plots in the background; returns immediately",
+)
+def plots_suitability_prefetch(req: SuitabilityRequest) -> dict:
+    _, cells = _plot_cells(req)
+    return {"tiles_queued": gaez.prefetch(req.input_level, {c for _, c in cells})}
 
 
 @router.get("/{field_id}", summary="One field as a GeoJSON feature (WGS84)")

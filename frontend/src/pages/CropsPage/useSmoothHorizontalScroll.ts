@@ -39,7 +39,8 @@ export function useSmoothHorizontalScroll(
         const step = distance * EASE
         const before = el.scrollLeft
         el.scrollLeft =
-            before + (Math.abs(step) < MIN_STEP ? Math.sign(step) * MIN_STEP : step)
+            before +
+            (Math.abs(step) < MIN_STEP ? Math.sign(step) * MIN_STEP : step)
         // stuck against an edge (e.g. the content shrank)
         if (el.scrollLeft === before) return stop()
         lastSet.current = el.scrollLeft
@@ -52,7 +53,8 @@ export function useSmoothHorizontalScroll(
             if (!el) return
             const max = el.scrollWidth - el.clientWidth
             target.current = Math.max(0, Math.min(max, left))
-            if (frame.current === null) frame.current = requestAnimationFrame(animate)
+            if (frame.current === null)
+                frame.current = requestAnimationFrame(animate)
         },
         [ref, animate],
     )

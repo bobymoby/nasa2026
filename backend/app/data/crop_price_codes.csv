@@ -1,0 +1,43 @@
+crop_id,crop_name,eurostat_prod_veg,fao_item_code
+wheat,Wheat (soft),01110000,15
+barley,Barley,01300000,44
+maize,Maize (grain),01500000,56
+rye,Rye,01200000,71
+oat,Oats,01400000,75
+sorghum,Sorghum,01910000,83
+buckwheat,Buckwheat,,89
+foxtail_millet,Millet,,79
+pearl_millet,Millet,,79
+dryland_rice,Rice (paddy),01600000,27
+wetland_rice,Rice (paddy),01600000,27
+sunflower,Sunflower seed,02120000,267
+rapeseed,Rapeseed,02110000,270
+soybean,Soybeans,02130000,236
+groundnut,Groundnuts (in shell),,242
+flax,Linseed,,333
+dry_pea,Dried peas,02210000,187
+chickpea,Chickpeas,02992000,191
+phaseolus_bean,Dried beans,02220000,176
+cowpea,Cowpeas,,195
+pigeonpea,Pigeon peas,,197
+sugarbeet,Sugar beet,02400000,157
+sugarcane,Sugar cane,,156
+white_potato,Potatoes (main crop),05120000,116
+sweet_potato,Sweet potatoes,,122
+cassava,Cassava,,125
+yam,Yams,,137
+cabbage,White cabbage,04191100,358
+carrot,Carrots,04195000,426
+onion,Onions,04196000,403
+tomato,Tomatoes (open field),04121000,388
+cotton,Seed cotton,02911000,328
+tobacco,Raw tobacco,02300000,826
+olive,Olives (for oil),06590000,260
+citrus,Oranges,06210000,490
+banana,Bananas,,486
+coffee,Coffee (green),,656
+cocoa,Cocoa beans,,661
+tea,Tea leaves,,667
+rubber,Natural rubber,,836
+oil_palm,Oil palm fruit,,254
+coconut,Coconuts,,249

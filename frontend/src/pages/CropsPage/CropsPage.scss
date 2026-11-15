@@ -12,7 +12,11 @@ $page-gutter: 32px;
     flex-direction: column;
     padding: 16px $page-gutter 0;
     background:
-        radial-gradient(1200px 400px at 50% -10%, rgb(16 185 129 / 12%), transparent 70%),
+        radial-gradient(
+            1200px 400px at 50% -10%,
+            rgb(16 185 129 / 12%),
+            transparent 70%
+        ),
         $page-bg;
     color: $page-text;
     font-family: $font-sans;
@@ -71,6 +75,7 @@ $page-gutter: 32px;
 }
 
 .crops-error {
+    margin-top: 12px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -204,7 +209,6 @@ $grid-gap: 12px; // GRID_GAP in CropsPage.tsx
     }
 }
 
-
 // ---- crop card --------------------------------------------------------------
 
 $soil-good: $accent;
@@ -217,6 +221,74 @@ $soil-bad-text: #b91c1c;
     gap: 10px;
 }
 
+.crop-class {
+    flex: none;
+    padding: 2px 8px;
+    border-radius: $radius-pill;
+    background-color: #f1f5f9;
+    color: $page-muted;
+    font-size: 11px;
+    font-weight: 600;
+
+    &.class-very_high,
+    &.class-high {
+        background-color: #d1fae5;
+        color: #065f46;
+    }
+
+    &.class-good {
+        background-color: #ecfccb;
+        color: #3f6212;
+    }
+
+    &.class-medium {
+        background-color: #fef3c7;
+        color: #92400e;
+    }
+}
+
+.crop-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.crop-stat {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.crop-stat-value {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+.crop-stat-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 1.3;
+    color: $page-muted;
+
+    span:first-child {
+        color: $page-text;
+        font-weight: 600;
+    }
+
+    span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
+
 .crop-name {
     flex: 1;
     min-width: 0;
@@ -227,57 +299,12 @@ $soil-bad-text: #b91c1c;
     font-weight: 600;
 }
 
-.crop-family {
-    padding: 2px 8px;
-    border-radius: $radius-pill;
-    background-color: #f1f5f9;
-    color: $page-muted;
-    font-size: 11px;
-    font-weight: 500;
-}
-
 .soil-impact {
     flex: 1;
     display: flex;
     flex-direction: column;
     gap: 8px;
     font-weight: 400;
-}
-
-.soil-score {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.soil-score-value {
-    font-size: 28px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-}
-
-.soil-score-text {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    font-size: 11px;
-    color: $page-muted;
-}
-
-.soil-score-track {
-    height: 6px;
-    border-radius: $radius-pill;
-    background-color: $page-border;
-    overflow: hidden;
-
-    div {
-        height: 100%;
-        border-radius: $radius-pill;
-        background-color: $soil-good;
-    }
 }
 
 .soil-components {
@@ -365,6 +392,39 @@ $soil-bad-text: #b91c1c;
     align-items: center;
     gap: 10px 14px;
     margin-top: 12px;
+}
+
+.crops-view {
+    display: flex;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid $page-border;
+    border-radius: $radius-pill;
+    background-color: $page-card;
+    box-shadow: $shadow-light;
+
+    button {
+        @include button-reset;
+        @include focus-ring($accent);
+        padding: 7px 14px;
+        border-radius: $radius-pill;
+        font-size: 13px;
+        font-weight: 500;
+        color: $page-muted;
+        white-space: nowrap;
+        transition:
+            background-color $transition,
+            color $transition;
+
+        &:hover {
+            color: $page-text;
+        }
+
+        &.active {
+            background-color: $accent;
+            color: #fff;
+        }
+    }
 }
 
 .crops-search {
@@ -527,6 +587,15 @@ $soil-bad-text: #b91c1c;
             cursor: default;
         }
     }
+}
+
+.crops-loading {
+    margin: 24px 0 0;
+    color: $page-muted;
+}
+
+.crops-scroller-placeholder {
+    flex: 1;
 }
 
 .crops-empty {

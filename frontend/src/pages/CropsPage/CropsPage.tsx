@@ -9,22 +9,31 @@ import {
 } from "react"
 import { Link } from "react-router"
 
-import { Crop, fetchCrops } from "../../api/fetchCrops"
+import {
+    CropsResult,
+    fetchCrops,
+    fetchSoilScores,
+    MIN_SUITABILITY,
+    SoilScoredCrop,
+} from "../../api/fetchCrops"
 import { AreaSelection, describeSelection } from "../../data/point"
 import CropCard from "./CropCard"
+import { ListedCrop, mergeCrops } from "./listedCrops"
 import { useSmoothHorizontalScroll } from "./useSmoothHorizontalScroll"
 
 // smallest height a card fits in; keep in sync with the card styles
 const MIN_CARD_HEIGHT = 250
 const GRID_GAP = 12
 
-type SortKey = "score" | "name"
+type SortKey = "suitability" | "soil" | "name"
+type View = "suited" | "all"
 
-// every word must appear somewhere in the name, family or note
-function matches(crop: Crop, words: string[]): boolean {
-    const text =
-        `${crop.name} ${crop.soil.family ?? ""} ${crop.soil.note ?? ""}`.toLowerCase()
-    return words.every((w) => text.includes(w))
+const SORTERS: Record<SortKey, (a: ListedCrop, b: ListedCrop) => number> = {
+    suitability: (a, b) =>
+        (b.gaez?.suitability ?? -1) - (a.gaez?.suitability ?? -1) ||
+        (b.soil?.score ?? -1) - (a.soil?.score ?? -1),
+    soil: (a, b) => (b.soil?.score ?? -1) - (a.soil?.score ?? -1),
+    name: (a, b) => a.name.localeCompare(b.name),
 }
 
 type Props = {
@@ -33,58 +42,80 @@ type Props = {
     onSelectedCropsChange: (ids: string[]) => void
 }
 
-function CropsPage({
-    selection,
-    selectedCrops,
-    onSelectedCropsChange,
-}: Props) {
-    const [crops, setCrops] = useState<Crop[] | null>(null)
-    const [error, setError] = useState<string | null>(null)
+function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
+    const [gaez, setGaez] = useState<CropsResult | null>(null)
+    const [gaezError, setGaezError] = useState<string | null>(null)
+    const [soil, setSoil] = useState<SoilScoredCrop[] | null>(null)
+    const [soilError, setSoilError] = useState<string | null>(null)
     const [reloadKey, setReloadKey] = useState(0)
+    const [view, setView] = useState<View>("suited")
     const [query, setQuery] = useState("")
-    const [sort, setSort] = useState<SortKey>("score")
-    // keeps typing responsive while the list re-filters
+    const [sort, setSort] = useState<SortKey>("suitability")
     const deferredQuery = useDeferredValue(query)
 
     useEffect(() => {
         const controller = new AbortController()
-        setCrops(null)
-        setError(null)
-
+        setGaez(null)
+        setGaezError(null)
         fetchCrops(selection, controller.signal)
-            .then(setCrops)
+            .then(setGaez)
             .catch((err) => {
                 if (controller.signal.aborted) return
-                setError(
-                    err instanceof Error ? err.message : "Failed to load crops",
-                )
+                setGaezError(err instanceof Error ? err.message : String(err))
             })
-
         return () => controller.abort()
     }, [selection, reloadKey])
 
-    // drop previously picked crops that aren't available for this area
     useEffect(() => {
-        if (!crops) return
-        const available = new Set(crops.map((c) => c.id))
+        const controller = new AbortController()
+        setSoilError(null)
+        fetchSoilScores(controller.signal)
+            .then(setSoil)
+            .catch((err) => {
+                if (controller.signal.aborted) return
+                setSoilError(err instanceof Error ? err.message : String(err))
+            })
+        return () => controller.abort()
+    }, [reloadKey])
+
+    const all = useMemo(
+        () => mergeCrops(gaez?.crops ?? null, soil),
+        [gaez, soil],
+    )
+
+    // drop picked crops not offered for this area; wait for both sources so
+    // nothing is dropped while one is still loading
+    useEffect(() => {
+        if (!gaez || !soil) return
+        const available = new Set(all.map((c) => c.id))
         const kept = selectedCrops.filter((id) => available.has(id))
         if (kept.length !== selectedCrops.length) onSelectedCropsChange(kept)
-    }, [crops, selectedCrops, onSelectedCropsChange])
+    }, [all, gaez, soil, selectedCrops, onSelectedCropsChange])
+
+    const shown = useMemo(
+        () =>
+            view === "suited"
+                ? all.filter(
+                      (c) => c.gaez && c.gaez.suitability >= MIN_SUITABILITY,
+                  )
+                : all,
+        [all, view],
+    )
 
     const filtered = useMemo(() => {
-        if (!crops) return []
         const words = deferredQuery.toLowerCase().split(/\s+/).filter(Boolean)
-        const found = crops.filter((c) => matches(c, words))
-        return sort === "score"
-            ? found.sort((a, b) => (b.soil.score ?? 0) - (a.soil.score ?? 0))
-            : found.sort((a, b) => a.name.localeCompare(b.name))
-    }, [crops, deferredQuery, sort])
+        return shown
+            .filter((c) => words.every((w) => c.searchText.includes(w)))
+            .sort(SORTERS[sort])
+    }, [shown, deferredQuery, sort])
+
+    const ready =
+        view === "suited" ? gaez !== null : gaez !== null || soil !== null
 
     const scrollerRef = useRef<HTMLDivElement>(null)
-    const scroller = useSmoothHorizontalScroll(scrollerRef, [crops])
+    const scroller = useSmoothHorizontalScroll(scrollerRef, [ready])
 
-    // as many rows as fit the height left for the grid; CSS can't count rows
-    // against a flexible height, so measure it
+    // CSS can't count rows against a flexible height, so measure it
     const [rows, setRows] = useState(1)
     useEffect(() => {
         const el = scrollerRef.current
@@ -98,7 +129,9 @@ function CropsPage({
             setRows(
                 Math.max(
                     1,
-                    Math.floor((height + GRID_GAP) / (MIN_CARD_HEIGHT + GRID_GAP)),
+                    Math.floor(
+                        (height + GRID_GAP) / (MIN_CARD_HEIGHT + GRID_GAP),
+                    ),
                 ),
             )
         }
@@ -106,24 +139,19 @@ function CropsPage({
         observer.observe(el)
         measure()
         return () => observer.disconnect()
-    }, [crops])
+    }, [ready])
 
-    // start from the beginning of the grid whenever it changes
     const { reset } = scroller
-    useEffect(() => reset(), [deferredQuery, sort, reset])
+    useEffect(() => reset(), [deferredQuery, sort, view, reset])
 
     const scrollPage = (direction: 1 | -1) => {
         const width = scrollerRef.current?.clientWidth ?? 0
         scroller.scrollBy(direction * width * 0.9)
     }
 
-    const byId = useMemo(
-        () => new Map((crops ?? []).map((c) => [c.id, c])),
-        [crops],
-    )
+    const byId = useMemo(() => new Map(all.map((c) => [c.id, c])), [all])
 
-    // stable across renders so the memoised cards don't all re-render when
-    // one is ticked; reads the latest selection through refs
+    // stable so the memoised cards don't all re-render when one is ticked
     const selectedRef = useRef(selectedCrops)
     selectedRef.current = selectedCrops
     const onChangeRef = useRef(onSelectedCropsChange)
@@ -138,6 +166,13 @@ function CropsPage({
     }, [])
     const selectedSet = useMemo(() => new Set(selectedCrops), [selectedCrops])
 
+    const errors = [gaezError, soilError].filter(Boolean)
+    const cells = gaez
+        ? gaez.cells === 1
+            ? "one ~9 km grid cell"
+            : `averaged over ${gaez.cells} ~9 km grid cells`
+        : "~9 km grid cells"
+
     return (
         <div className="crops-page">
             <header className="crops-header">
@@ -149,11 +184,14 @@ function CropsPage({
                     className="crops-info"
                     tabIndex={0}
                     title={
-                        "Each crop's soil health score (0–100) sums how it " +
-                        "treats the soil: nitrogen, organic matter, ground " +
-                        "cover and break-crop value add to it; disturbance " +
-                        "and harvest removal take away. Hover a row on a " +
-                        "card for details."
+                        "Suitability: FAO GAEZ v4 rating for rainfed farming " +
+                        `(1981–2010 climate, high input level; ${cells}). ` +
+                        `"Suited to this area" lists crops rated at least ` +
+                        `medium (${MIN_SUITABILITY} / 100).\n\n` +
+                        "Soil health (0–100): nitrogen, organic matter, " +
+                        "ground cover and break-crop value add to it; " +
+                        "disturbance and harvest removal take away. Hover a " +
+                        "row on a card for details."
                     }
                 >
                     How scores work
@@ -163,120 +201,147 @@ function CropsPage({
                 </p>
             </header>
 
-            {error && (
+            {errors.length > 0 && (
                 <div className="crops-error">
-                    {error}{" "}
+                    {errors.join(" · ")}
                     <button onClick={() => setReloadKey((k) => k + 1)}>
                         Retry
                     </button>
                 </div>
             )}
-            {!error && !crops && <p>Loading available crops…</p>}
-            {crops && crops.length === 0 && (
-                <p>No crops are available for this area.</p>
-            )}
-            {crops && crops.length > 0 && (
-                <>
-                    <div className="crops-toolbar">
-                        <input
-                            type="search"
-                            className="crops-search"
-                            placeholder={`Search ${crops.length} crops by name, family or note…`}
-                            value={query}
-                            onChange={(e) => setQuery(e.target.value)}
-                            autoFocus
-                        />
-                        <label className="crops-sort">
-                            Sort
-                            <select
-                                value={sort}
-                                onChange={(e) => setSort(e.target.value as SortKey)}
-                            >
-                                <option value="score">Soil score, best first</option>
-                                <option value="name">Name, A–Z</option>
-                            </select>
-                        </label>
-                        <span className="crops-results">
-                            {filtered.length === crops.length
-                                ? `${crops.length} crops`
-                                : `${filtered.length} of ${crops.length} match`}
-                        </span>
-                        <span className="crops-arrows">
-                            <button
-                                type="button"
-                                aria-label="Scroll left"
-                                disabled={scroller.atStart}
-                                onClick={() => scrollPage(-1)}
-                            >
-                                ‹
-                            </button>
-                            <button
-                                type="button"
-                                aria-label="Scroll right"
-                                disabled={scroller.atEnd}
-                                onClick={() => scrollPage(1)}
-                            >
-                                ›
-                            </button>
-                        </span>
-                    </div>
 
-                    {selectedCrops.length > 0 && (
-                        <div className="crops-selected">
-                            {selectedCrops.map((id) => (
-                                <button
-                                    key={id}
-                                    type="button"
-                                    className="crops-chip"
-                                    onClick={() => toggle(id)}
-                                    aria-label={`Remove ${byId.get(id)?.name ?? id}`}
-                                >
-                                    {byId.get(id)?.name ?? id}
-                                    <span aria-hidden="true">×</span>
-                                </button>
-                            ))}
-                        </div>
-                    )}
+            <div className="crops-toolbar">
+                <div className="crops-view" role="tablist">
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={view === "suited"}
+                        className={view === "suited" ? "active" : undefined}
+                        onClick={() => setView("suited")}
+                    >
+                        Suited to this area
+                    </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={view === "all"}
+                        className={view === "all" ? "active" : undefined}
+                        onClick={() => setView("all")}
+                    >
+                        All crops
+                    </button>
+                </div>
+                <input
+                    type="search"
+                    className="crops-search"
+                    placeholder="Search by name, group, family or note…"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    autoFocus
+                />
+                <label className="crops-sort">
+                    Sort
+                    <select
+                        value={sort}
+                        onChange={(e) => setSort(e.target.value as SortKey)}
+                    >
+                        <option value="suitability">Suitability</option>
+                        <option value="soil">Soil health</option>
+                        <option value="name">Name, A–Z</option>
+                    </select>
+                </label>
+                {ready && (
+                    <span className="crops-results">
+                        {filtered.length === shown.length
+                            ? `${shown.length} crops`
+                            : `${filtered.length} of ${shown.length} match`}
+                    </span>
+                )}
+                <span className="crops-arrows">
+                    <button
+                        type="button"
+                        aria-label="Scroll left"
+                        disabled={!ready || scroller.atStart}
+                        onClick={() => scrollPage(-1)}
+                    >
+                        ‹
+                    </button>
+                    <button
+                        type="button"
+                        aria-label="Scroll right"
+                        disabled={!ready || scroller.atEnd}
+                        onClick={() => scrollPage(1)}
+                    >
+                        ›
+                    </button>
+                </span>
+            </div>
 
-                    {filtered.length === 0 && (
-                        <p className="crops-empty">
-                            No crops match “{deferredQuery}”.
-                        </p>
-                    )}
-
-                    <div className="crops-scroller" ref={scrollerRef}>
-                        <ul
-                            className="crops-list"
-                            style={{
-                                gridTemplateRows: `repeat(${rows}, minmax(${MIN_CARD_HEIGHT}px, 1fr))`,
-                            }}
+            {selectedCrops.length > 0 && (
+                <div className="crops-selected">
+                    {selectedCrops.map((id) => (
+                        <button
+                            key={id}
+                            type="button"
+                            className="crops-chip"
+                            onClick={() => toggle(id)}
+                            aria-label={`Remove ${byId.get(id)?.name ?? id}`}
                         >
-                            {filtered.map((crop) => (
-                                <CropCard
-                                    key={crop.id}
-                                    crop={crop}
-                                    checked={selectedSet.has(crop.id)}
-                                    onToggle={toggle}
-                                />
-                            ))}
-                        </ul>
-                    </div>
-                    <div className="crops-footer">
-                        <p className="crops-count">
-                            {selectedCrops.length} of {crops.length} selected
-                        </p>
-                        {selectedCrops.length > 0 ? (
-                            <Link to="/strategy" className="crops-next">
-                                Build strategies →
-                            </Link>
-                        ) : (
-                            <span className="crops-next disabled">
-                                Pick a crop to continue
-                            </span>
-                        )}
-                    </div>
-                </>
+                            {byId.get(id)?.name ?? id}
+                            <span aria-hidden="true">×</span>
+                        </button>
+                    ))}
+                </div>
             )}
+
+            {!ready && !gaezError && (
+                <p className="crops-loading">
+                    Checking which crops suit this area… a new area takes up to
+                    ~10 s.
+                </p>
+            )}
+            {ready && filtered.length === 0 && (
+                <p className="crops-empty">
+                    {shown.length === 0
+                        ? "No field crops are rated suitable for this area."
+                        : `No crops match “${deferredQuery}”.`}
+                </p>
+            )}
+
+            {ready ? (
+                <div className="crops-scroller" ref={scrollerRef}>
+                    <ul
+                        className="crops-list"
+                        style={{
+                            gridTemplateRows: `repeat(${rows}, minmax(${MIN_CARD_HEIGHT}px, 1fr))`,
+                        }}
+                    >
+                        {filtered.map((crop) => (
+                            <CropCard
+                                key={crop.id}
+                                crop={crop}
+                                checked={selectedSet.has(crop.id)}
+                                onToggle={toggle}
+                            />
+                        ))}
+                    </ul>
+                </div>
+            ) : (
+                <div className="crops-scroller-placeholder" />
+            )}
+
+            <div className="crops-footer">
+                <p className="crops-count">{selectedCrops.length} selected</p>
+                {selectedCrops.length > 0 ? (
+                    <Link to="/strategy" className="crops-next">
+                        Build strategies →
+                    </Link>
+                ) : (
+                    <span className="crops-next disabled">
+                        Pick a crop to continue
+                    </span>
+                )}
+            </div>
         </div>
     )
 }
