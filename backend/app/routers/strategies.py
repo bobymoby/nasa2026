@@ -33,7 +33,7 @@ StrategyType = Literal[
 class StrategyWeights(CamelModel):
     model_config = ConfigDict(extra="forbid")
 
-    profit: float | None = Field(default=None, ge=0)
+    revenue: float | None = Field(default=None, ge=0)
     soil_benefit: float | None = Field(default=None, ge=0)
     risk_control: float | None = Field(default=None, ge=0)
     water_efficiency: float | None = Field(default=None, ge=0)
@@ -177,7 +177,7 @@ class CropRoles(CamelModel):
 
 
 class Evaluation(CamelModel):
-    profit_eur_ha: float
+    revenue_eur_ha: float = Field(description="Market revenue plus crop- and practice-specific CAP payments")
     years: int = Field(description="Calendar years the rotation spans")
     idle_months: int = Field(description="Months in those years with nothing growing")
     soil_benefit_score: float
@@ -194,36 +194,24 @@ class Evaluation(CamelModel):
 
 
 class StrategyComparison(BaseModel):
-    profit_difference_eur_ha: float
+    revenue_difference_eur_ha: float
     risk_difference: float
     soil_benefit_difference: float
     water_demand_difference: int | None
 
 
-class Money(CamelModel):
-    revenue: float
-    seed_cost: float
-    operating_cost: float
-    total_cost: float
-    profit: float
-
-
-class PlantingMoney(CamelModel):
+class PlantingRevenue(CamelModel):
     crop_name: str
     role: Literal["cash", "cover", "forage"]
     yield_t_ha: float | None
     price_eur_t: float | None
     revenue: float
-    cost: float
-    profit: float
     source: str
 
 
-class YearMoney(CamelModel):
+class YearRevenue(CamelModel):
     year: int
     revenue: float
-    cost: float
-    profit: float
 
 
 class Economics(CamelModel):
@@ -233,15 +221,15 @@ class Economics(CamelModel):
     complete: bool
     missing_data: list[str]
     area_ha: float
-    per_ha: Money
-    profit_per_ha_year: float
-    total: Money
-    plantings: list[PlantingMoney]
-    by_year: list[YearMoney]
+    revenue_per_ha: float = Field(description="Market revenue per ha over one pass through the rotation")
+    revenue_per_ha_year: float
+    total_revenue: float = Field(description="revenue_per_ha over the selected area")
+    plantings: list[PlantingRevenue]
+    by_year: list[YearRevenue]
     cap_payments: list["CapPayment"]
     cap_per_ha: float = Field(description="EU CAP payments per ha over one pass through the rotation")
-    profit_with_cap_per_ha_year: float
-    total_profit_with_cap: float
+    revenue_with_cap_per_ha_year: float
+    total_revenue_with_cap: float
 
 
 class CapPayment(CamelModel):
@@ -277,22 +265,12 @@ class Strategy(CamelModel):
 
 
 class StrategiesResponse(CamelModel):
-    data_mode: Literal["sourced_with_estimated_costs"]
+    data_mode: Literal["sourced"]
     rotations_evaluated: int
     baseline_rotation: list[str]
     baseline: dict[str, object]
     assumptions: list[str]
     strategies: list[Strategy]
-
-
-def _money(e: econ.StrategyEconomics, scale: float = 1.0) -> Money:
-    return Money(
-        revenue=round(e.revenue * scale),
-        seed_cost=round(e.seed_cost * scale),
-        operating_cost=round(e.operating_cost * scale),
-        total_cost=round(e.total_cost * scale),
-        profit=round(e.profit * scale),
-    )
 
 
 def _market(request: AreaRequest) -> Market:
@@ -310,6 +288,26 @@ def _market(request: AreaRequest) -> Market:
 def _economics(strategy: dict, area_ha: float, market: Market) -> Economics:
     e = econ.strategy_economics(strategy["plantings"], strategy["duration_years"], market, area_ha)
     return Economics(
+        country=e.country,
+        price_year=e.price_year,
+        complete=e.complete,
+        missing_data=e.missing_data,
+        area_ha=round(area_ha, 2),
+        revenue_per_ha=round(e.revenue),
+        revenue_per_ha_year=round(e.revenue / e.years),
+        total_revenue=round(e.revenue * area_ha),
+        plantings=[
+            PlantingRevenue(
+                crop_name=p.crop_name,
+                role=p.role,
+                yield_t_ha=p.yield_t_ha,
+                price_eur_t=p.price_eur_t,
+                revenue=round(p.revenue),
+                source=p.source,
+            )
+            for p in e.plantings
+        ],
+        by_year=[YearRevenue(year=i + 1, revenue=round(r)) for i, r in enumerate(e.by_year())],
         cap_payments=[
             CapPayment(
                 name=line.name,
@@ -322,33 +320,8 @@ def _economics(strategy: dict, area_ha: float, market: Market) -> Economics:
             for line in e.cap
         ],
         cap_per_ha=round(e.cap_total),
-        profit_with_cap_per_ha_year=round(e.profit_with_cap / e.years),
-        total_profit_with_cap=round(e.profit_with_cap * area_ha),
-        country=e.country,
-        price_year=e.price_year,
-        complete=e.complete,
-        missing_data=e.missing_data,
-        area_ha=round(area_ha, 2),
-        per_ha=_money(e),
-        profit_per_ha_year=round(e.profit / e.years),
-        total=_money(e, area_ha),
-        plantings=[
-            PlantingMoney(
-                crop_name=p.crop_name,
-                role=p.role,
-                yield_t_ha=p.yield_t_ha,
-                price_eur_t=p.price_eur_t,
-                revenue=round(p.revenue),
-                cost=round(p.cost),
-                profit=round(p.revenue - p.cost),
-                source=p.source,
-            )
-            for p in e.plantings
-        ],
-        by_year=[
-            YearMoney(year=i + 1, revenue=round(r), cost=round(c), profit=round(r - c))
-            for i, (r, c) in enumerate(e.by_year())
-        ],
+        revenue_with_cap_per_ha_year=round(e.revenue_with_cap / e.years),
+        total_revenue_with_cap=round(e.revenue_with_cap * area_ha),
     )
 
 
@@ -385,7 +358,7 @@ class PlannableCrops(CamelModel):
     "/strategies/crops",
     response_model=PlannableCrops,
     response_model_by_alias=True,
-    summary="Crops the strategies can plan for an area: market figures and a cost estimate",
+    summary="Crops the strategies can plan for an area: those with a national yield and price",
 )
 def plannable_crops(request: AreaRequest) -> PlannableCrops:
     market = _market(request)
@@ -433,8 +406,8 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
         ),
         # area-wide payments (BISS, CRISS) are the same for every plan, so only
         # the crop- and practice-specific ones affect the ranking
-        "crop_profit_eur_ha": {
-            c: econ.crop_profit_eur_ha(c, market) + cap.crop_payment_eur_ha(c, area_ha)
+        "crop_revenue_eur_ha": {
+            c: econ.crop_revenue_eur_ha(c, market) + cap.crop_payment_eur_ha(c, area_ha)
             for c in svc.CROP_BY_ID
         },
         "cover_payment_eur_ha": cap.cover_payment_eur_ha(area_ha),
@@ -485,15 +458,16 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
     for strategy in ranked:
         strategy["market_considerations"].extend(notes)
     return StrategiesResponse(
-        data_mode="sourced_with_estimated_costs",
+        data_mode="sourced",
         rotations_evaluated=rotations_evaluated,
         baseline_rotation=territory["baseline_rotation"],
         baseline=svc.evaluate_baseline(territory),
         assumptions=[
             "Revenue is the national 5-year mean yield times the 5-year mean market price "
             f"({market.country}, Eurostat or FAOSTAT, in {market.price_year or 'current'} euros); "
-            "crops without published figures or a cost estimate are left out of the totals and flagged.",
-            "Seed, operating and cover-crop costs are typical estimates, not measured farm budgets.",
+            "crops without published figures are left out of the totals and flagged.",
+            "There is no sourced cost data, so costs and profit are not shown; strategies are "
+            "compared on revenue.",
             "EU CAP payments are the amounts Bulgaria actually paid per hectare for claim year 2024 "
             f"({cap.SOURCE}); they assume the farmer applies and meets each scheme's conditions, "
             "and the selected area is treated as the whole farm. Coupled support and eco-schemes "

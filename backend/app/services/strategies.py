@@ -9,8 +9,9 @@ Crop profiles are built per request from sourced data:
 - suitability: FAO GAEZ v4 for the area (`territory["crop_suitability"]`)
 - risk: year-to-year variability of national yields and prices
   (`territory["crop_risk"]`, see `crop_risk`)
-- profit: national yields × market prices minus estimated costs
-  (`territory["crop_profit_eur_ha"]`, from `strategy_economics`)
+- revenue: national yields × market prices, plus the crop's own EU CAP
+  payments (`territory["crop_revenue_eur_ha"]`); there is no sourced cost
+  data, so nothing is subtracted
 
 A value whose source is unavailable is None and scores neutral; it is never
 filled in by hand.
@@ -32,7 +33,6 @@ from itertools import combinations_with_replacement
 from typing import Any
 
 from app.services import agronomy, cap_payments, drought
-from app.services.strategy_economics import COVER_COSTS_EUR_HA, DEFAULT_COVER_COST_EUR_HA
 
 # strategy crop id -> crop_agronomy.csv id
 STRATEGY_CROPS = {
@@ -117,26 +117,26 @@ CROP_BY_ID = {
 }
 COVER_BY_ID = {crop_id: _profile(crop_id, record) for crop_id, record in _cover_records().items()}
 
-COMPONENTS = ("profit", "soil_benefit", "risk_control", "water_efficiency", "feasibility")
+COMPONENTS = ("revenue", "soil_benefit", "risk_control", "water_efficiency", "feasibility")
 STRATEGY_PROFILES: dict[str, dict[str, float]] = {
     "profit_first": {
-        "profit": 0.45, "soil_benefit": 0.10, "risk_control": 0.10,
+        "revenue": 0.45, "soil_benefit": 0.10, "risk_control": 0.10,
         "water_efficiency": 0.10, "feasibility": 0.25,
     },
     "soil_builder": {
-        "profit": 0.15, "soil_benefit": 0.40, "risk_control": 0.15,
+        "revenue": 0.15, "soil_benefit": 0.40, "risk_control": 0.15,
         "water_efficiency": 0.10, "feasibility": 0.20,
     },
     "risk_balanced": {
-        "profit": 0.15, "soil_benefit": 0.15, "risk_control": 0.40,
+        "revenue": 0.15, "soil_benefit": 0.15, "risk_control": 0.40,
         "water_efficiency": 0.15, "feasibility": 0.15,
     },
     "water_efficient": {
-        "profit": 0.15, "soil_benefit": 0.15, "risk_control": 0.15,
+        "revenue": 0.15, "soil_benefit": 0.15, "risk_control": 0.15,
         "water_efficiency": 0.40, "feasibility": 0.15,
     },
     "balanced": {
-        "profit": 0.20, "soil_benefit": 0.20, "risk_control": 0.20,
+        "revenue": 0.20, "soil_benefit": 0.20, "risk_control": 0.20,
         "water_efficiency": 0.20, "feasibility": 0.20,
     },
 }
@@ -145,27 +145,27 @@ STRATEGY_NAMES = {
         "Planned rotation",
         "The rotation you plan to grow; it is the baseline the other strategies are compared with.",
     ),
-    "profit_first": ("Profit-focused", "The highest estimated profit per hectare per year."),
+    "profit_first": ("Revenue-focused", "The highest estimated revenue per hectare per year."),
     "soil_builder": ("Soil-building", "The best humus balance: legumes and cover crops."),
     "risk_balanced": ("Risk-balanced", "The crops whose national yields and prices vary least."),
-    "water_efficient": ("Water-efficient", "The most profit per mm of crop water demand."),
-    "balanced": ("Balanced", "The best equal-weight mix of profit, soil, risk, water and feasibility."),
+    "water_efficient": ("Water-efficient", "The most revenue per mm of crop water demand."),
+    "balanced": ("Balanced", "The best equal-weight mix of revenue, soil, risk, water and feasibility."),
 }
 EXTRA_CROP_REASONS = {
-    "profit_first": "the highest estimated profit among the remaining crops",
+    "profit_first": "the highest estimated revenue among the remaining crops",
     "soil_builder": "the best humus balance among the remaining crops",
     "risk_balanced": "steady national yields and prices and a break from your crops' plant families",
-    "water_efficient": "low water demand and good profit per mm of water",
+    "water_efficient": "low water demand and good revenue per mm of water",
     "balanced": "the best all-round score among the remaining crops",
 }
-# strategy -> (shortest idle window in months worth covering, how to choose the cover)
+# strategy -> shortest idle window in months worth covering; the cover with the best humus balance is sown
 COVER_POLICIES = {
-    "soil_builder": (2, "soil"),
-    "risk_balanced": (5, "cheap"),
-    "balanced": (6, "value"),
+    "soil_builder": 2,
+    "risk_balanced": 5,
+    "balanced": 6,
 }
 NO_COVER_REASONS = {
-    "profit_first": "cover crops would add cost without a harvest",
+    "profit_first": "cover crops bring no harvest to sell",
     "water_efficient": "cover crops would draw soil water before the next crop",
 }
 DEFAULT_BASELINE = ("wheat", "sunflower", "barley", "chickpea", "rapeseed")
@@ -182,22 +182,22 @@ GOAL_FOCUS = 0.7
 COVER_EARLY_END_MONTHS = 1
 
 
-def _profit_per_year(m: dict[str, Any]) -> float:
-    return m["profit_eur_ha"] / m["years"]
+def _revenue_per_year(m: dict[str, Any]) -> float:
+    return m["revenue_eur_ha"] / m["years"]
 
 
-def _profit_per_mm(m: dict[str, Any]) -> float | None:
+def _revenue_per_mm(m: dict[str, Any]) -> float | None:
     water = m["water_demand_mm"]
-    return None if water is None else m["profit_eur_ha"] / max(water, 1)
+    return None if water is None else m["revenue_eur_ha"] / max(water, 1)
 
 
 # strategy -> (higher-is-better measure it is picked on, how to describe the winner);
 # a strategy without a goal, or whose measure is unknown, takes its weighted score
 GOALS: dict[str, tuple[Any, str]] = {
-    "profit_first": (_profit_per_year, "the highest estimated profit per hectare per year"),
+    "profit_first": (_revenue_per_year, "the highest estimated revenue per hectare per year"),
     "soil_builder": (lambda m: m["soil_benefit_score"], "the best humus balance"),
     "risk_balanced": (lambda m: -m["risk_score"], "the steadiest national yields and prices"),
-    "water_efficient": (_profit_per_mm, "the most profit per mm of crop water demand"),
+    "water_efficient": (_revenue_per_mm, "the most revenue per mm of crop water demand"),
 }
 
 
@@ -253,12 +253,8 @@ def _is_cover(crop: CropProfile) -> bool:
     return crop.role == "cover"
 
 
-def _cover_cost(crop_id: str) -> float:
-    return sum(COVER_COSTS_EUR_HA.get(crop_id, DEFAULT_COVER_COST_EUR_HA))
-
-
-def _crop_profit(crop: CropProfile, territory: dict[str, Any]) -> float:
-    return territory.get("crop_profit_eur_ha", {}).get(crop.id, 0.0)
+def _crop_revenue(crop: CropProfile, territory: dict[str, Any]) -> float:
+    return territory.get("crop_revenue_eur_ha", {}).get(crop.id, 0.0)
 
 
 def _score_or_neutral(value: float | None) -> float:
@@ -359,24 +355,15 @@ def _schedule(
     return scheduled
 
 
-def _cover_preference(crop: CropProfile, pick: str) -> float:
-    if pick == "soil":
-        return crop.humus_ceq
-    if pick == "cheap":
-        return -_cover_cost(crop.id)
-    return crop.humus_ceq / _cover_cost(crop.id)
-
-
 def _add_cover_crops(
     schedule: list[dict[str, Any]],
     strategy_type: str,
     territory: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Fill idle windows between harvest and the next sowing per the strategy's cover policy."""
-    policy = COVER_POLICIES.get(strategy_type)
-    if policy is None:
+    min_idle = COVER_POLICIES.get(strategy_type)
+    if min_idle is None:
         return schedule
-    min_idle, pick = policy
     covers = _covers(territory)
     out = []
     for item, following in zip(schedule, [*schedule[1:], None]):
@@ -391,7 +378,7 @@ def _add_cover_crops(
             if (slot := _cover_slot(cover, first_free, last_free)) is not None
         ]
         if fits:
-            out.append(max(fits, key=lambda slot: _cover_preference(slot["crop"], pick)))
+            out.append(max(fits, key=lambda slot: slot["crop"].humus_ceq))
     return out
 
 
@@ -436,9 +423,9 @@ def _metrics(rotation: dict[str, Any], territory: dict[str, Any]) -> dict[str, A
         if preferred else 1.0
     )
     years, idle = _pack(rotation["schedule"])
-    profit = (
-        sum(_crop_profit(crop, territory) for crop in crops)
-        - sum(_cover_cost(crop.id) - territory.get("cover_payment_eur_ha", 0.0) for crop in covers)
+    revenue = (
+        sum(_crop_revenue(crop, territory) for crop in crops)
+        + len(covers) * territory.get("cover_payment_eur_ha", 0.0)
         + years * cap_payments.diversification_eur_ha_year(
             [crop.id for crop in crops], territory.get("area_ha", 0.0)
         )
@@ -456,7 +443,7 @@ def _metrics(rotation: dict[str, Any], territory: dict[str, Any]) -> dict[str, A
         0.8 * (sum(scores) / len(scores)) + 20 * preferred_fraction - rotation_penalty,
     )
     return {
-        "profit_eur_ha": round(profit, 2),
+        "revenue_eur_ha": round(revenue, 2),
         "years": years,
         "idle_months": idle,
         "soil_benefit_score": round(soil_benefit, 2),
@@ -479,7 +466,7 @@ def _baseline_metrics(baseline: list[str], territory: dict[str, Any]) -> dict[st
     metrics = _metrics(rotation, territory)
     water = metrics["water_demand_mm"]
     metrics["water_efficiency_score"] = (
-        round(100 * metrics["profit_eur_ha"] / max(water, 1), 2) if water is not None else None
+        round(100 * metrics["revenue_eur_ha"] / max(water, 1), 2) if water is not None else None
     )
     return metrics
 
@@ -507,7 +494,7 @@ def planned_strategy(
     metrics = _metrics(rotation, territory)
     water = metrics["water_demand_mm"]
     metrics["water_efficiency_score"] = (
-        round(100 * metrics["profit_eur_ha"] / max(water, 1), 2) if water is not None else NEUTRAL_SCORE
+        round(100 * metrics["revenue_eur_ha"] / max(water, 1), 2) if water is not None else NEUTRAL_SCORE
     )
     metrics["score_components"] = {}
     metrics["scoring_weights"] = {}
@@ -533,7 +520,7 @@ def evaluate_baseline(territory: dict[str, Any]) -> dict[str, Any]:
     metrics = _baseline_metrics(crop_ids, territory)
     return {
         "crop_ids": crop_ids,
-        "profit_eur_ha": metrics["profit_eur_ha"],
+        "revenue_eur_ha": metrics["revenue_eur_ha"],
         "soil_benefit_score": metrics["soil_benefit_score"],
         "risk_score": metrics["risk_score"],
         "water_demand_mm": metrics["water_demand_mm"],
@@ -651,12 +638,12 @@ def _to_legacy_shape(
             "drought_tolerant": _role_assessment(planted, "drought_tolerant"),
         },
         "market_considerations": [
-            "Revenue uses national average yields and market prices; seed and other costs are typical estimates.",
-            "Check local buyers, your own yields and input costs before use.",
+            "Revenue uses national average yields and market prices; costs are not included.",
+            "Check local buyers and your own yields before use.",
         ],
         "evaluation": metrics,
         "comparison": {
-            "profit_difference_eur_ha": round(metrics["profit_eur_ha"] - baseline_metrics["profit_eur_ha"], 2),
+            "revenue_difference_eur_ha": round(metrics["revenue_eur_ha"] - baseline_metrics["revenue_eur_ha"], 2),
             "risk_difference": round(metrics["risk_score"] - baseline_metrics["risk_score"], 2),
             "soil_benefit_difference": round(metrics["soil_benefit_score"] - baseline_metrics["soil_benefit_score"], 2),
             "water_demand_difference": _difference(water, baseline_metrics["water_demand_mm"]),
@@ -682,7 +669,7 @@ def _role_assessment(crops: list[CropProfile], trait: str) -> dict[str, str]:
 
 def _explanations(metrics: dict[str, Any], baseline: dict[str, Any], crops: list[CropProfile]) -> list[str]:
     differences = (
-        ("profit", metrics["profit_eur_ha"] - baseline["profit_eur_ha"], "more", "less"),
+        ("revenue", metrics["revenue_eur_ha"] - baseline["revenue_eur_ha"], "more", "less"),
         ("soil benefit", metrics["soil_benefit_score"] - baseline["soil_benefit_score"], "higher", "lower"),
         ("risk", metrics["risk_score"] - baseline["risk_score"], "higher", "lower"),
         ("water demand", _difference(metrics["water_demand_mm"], baseline["water_demand_mm"]), "more", "less"),
@@ -698,7 +685,6 @@ def _explanations(metrics: dict[str, Any], baseline: dict[str, Any], crops: list
     traits = sorted({trait for crop in crops for trait in crop.traits})
     if traits:
         explanations.append("Rotation traits: " + ", ".join(traits) + ".")
-    explanations.append("Costs are typical estimates; the other figures come from the data sources listed below.")
     return explanations
 
 
@@ -743,11 +729,11 @@ def _extra_crops(
     ]
     if not candidates:
         return []
-    profits = [_crop_profit(crop, territory) for crop in candidates]
+    revenues = [_crop_revenue(crop, territory) for crop in candidates]
     demands = [crop.water_demand_mm for crop in candidates]
     known_water = all(d is not None for d in demands)
-    efficiencies = [p / max(d, 1) for p, d in zip(profits, demands)] if known_water else []
-    profit_range = (min(profits), max(profits))
+    efficiencies = [p / max(d, 1) for p, d in zip(revenues, demands)] if known_water else []
+    revenue_range = (min(revenues), max(revenues))
     top = max(weights.values())
     leading = [key for key, value in weights.items() if value == top]
     goal = leading[0] if len(leading) == 1 else None
@@ -763,7 +749,7 @@ def _extra_crops(
     def score(index: int) -> float:
         crop = candidates[index]
         components = {
-            "profit": _linear_score(profits[index], *profit_range),
+            "revenue": _linear_score(revenues[index], *revenue_range),
             "soil_benefit": _humus_score(crop.humus_ceq),
             "risk_control": 100 - _score_or_neutral(crop.risk),
             "water_efficiency": water_score(index),
@@ -792,11 +778,11 @@ def _score_candidates(
         for rotation in rotations
     ]
     metric_list = [_metrics(rotation, territory) for rotation in planned]
-    profits = [metrics["profit_eur_ha"] for metrics in metric_list]
-    profit_range = (min(profits), max(profits))
+    revenues = [metrics["revenue_eur_ha"] for metrics in metric_list]
+    revenue_range = (min(revenues), max(revenues))
     known_water = all(metrics["water_demand_mm"] is not None for metrics in metric_list)
     efficiencies = [
-        metrics["profit_eur_ha"] / max(metrics["water_demand_mm"], 1) if known_water else 0.0
+        metrics["revenue_eur_ha"] / max(metrics["water_demand_mm"], 1) if known_water else 0.0
         for metrics in metric_list
     ]
     efficiency_range = (min(efficiencies), max(efficiencies))
@@ -806,7 +792,7 @@ def _score_candidates(
             round(_linear_score(efficiency, *efficiency_range), 2) if known_water else NEUTRAL_SCORE
         )
         components = {
-            "profit": _linear_score(metrics["profit_eur_ha"], *profit_range),
+            "revenue": _linear_score(metrics["revenue_eur_ha"], *revenue_range),
             "soil_benefit": metrics["soil_benefit_score"],
             "risk_control": 100 - metrics["risk_score"],
             "water_efficiency": metrics["water_efficiency_score"],

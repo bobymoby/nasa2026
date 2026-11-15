@@ -26,14 +26,6 @@ export type Planting = {
 export type Rating = { score: number; summary: string }
 export type Assessment = { level: Level; summary: string }
 
-export type EconomicsMoney = {
-    revenue: number
-    seedCost: number
-    operatingCost: number
-    totalCost: number
-    profit: number
-}
-
 export type CapPayment = {
     name: string
     eurPerHa: number
@@ -44,42 +36,37 @@ export type CapPayment = {
     assumption: string | null
 }
 
-// Current backend contract matches the data returned by app.routers.strategies.
-// Legacy compatibility aliases are kept to support older frontend code paths.
+// market revenue in EUR; there is no sourced cost data, so no cost or profit
 export type Economics = {
     currency: "EUR"
     // ISO alpha-2 country whose market figures are used
     country: string
     // prices are real euros of this year
     priceYear: number | null
-    // false when a crop lacks a published yield, price or cost estimate and is left out of the totals
+    // false when a crop lacks a published yield or price and is left out of the totals
     complete: boolean
     missingData: string[]
     areaHa: number
-    perHa: EconomicsMoney
-    profitPerHaYear: number
-    total: EconomicsMoney
+    // one pass through the rotation
+    revenuePerHa: number
+    revenuePerHaYear: number
+    // revenuePerHa over the selected area
+    totalRevenue: number
     plantings: {
         cropName: string
         role: PlantingRole
         yieldTHa: number | null
         priceEurT: number | null
         revenue: number
-        cost: number
-        profit: number
         // "price eurostat 2020–2024, yield eurostat 2021–2025"
         source: string
     }[]
-    byYear: { year: number; revenue: number; cost: number; profit: number }[]
-    // EU CAP payments per ha over the whole rotation, kept apart from market profit
+    byYear: { year: number; revenue: number }[]
+    // EU CAP payments per ha over the whole rotation, kept apart from market revenue
     capPayments: CapPayment[]
     capPerHa: number
-    profitWithCapPerHaYear: number
-    totalProfitWithCap: number
-    // Legacy compatibility values for older code paths; computed when absent.
-    revenuePerHa?: number
-    revenuePerHaYear?: number
-    totalRevenue?: number
+    revenueWithCapPerHaYear: number
+    totalRevenueWithCap: number
 }
 
 export type Strategy = {
@@ -164,36 +151,6 @@ export function fetchPlannableCrops(
     )
 }
 
-function normalizeEconomics(
-    economics: Economics,
-    durationYears: number,
-): Economics {
-    const perHa = economics.perHa ?? {
-        revenue: economics.revenuePerHa ?? 0,
-        seedCost: 0,
-        operatingCost: 0,
-        totalCost: 0,
-        profit: 0,
-    }
-    const total = economics.total ?? {
-        revenue: economics.totalRevenue ?? 0,
-        seedCost: 0,
-        operatingCost: 0,
-        totalCost: 0,
-        profit: 0,
-    }
-    return {
-        ...economics,
-        perHa,
-        total,
-        revenuePerHa: economics.revenuePerHa ?? perHa.revenue,
-        revenuePerHaYear:
-            economics.revenuePerHaYear ??
-            (durationYears > 0 ? perHa.revenue / durationYears : perHa.revenue),
-        totalRevenue: economics.totalRevenue ?? total.revenue,
-    }
-}
-
 const strategiesKey = (
     selection: AreaSelection,
     crops: string[],
@@ -263,15 +220,5 @@ async function loadStrategies(
                 : `Failed to load strategies (${res.status})`,
         )
     }
-    const data: StrategiesResult = await res.json()
-    return {
-        ...data,
-        strategies: data.strategies.map((strategy) => ({
-            ...strategy,
-            economics: normalizeEconomics(
-                strategy.economics,
-                strategy.durationYears,
-            ),
-        })),
-    }
+    return res.json()
 }

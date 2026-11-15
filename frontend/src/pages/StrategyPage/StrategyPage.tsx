@@ -101,13 +101,6 @@ function averageScore(s: Strategy): number {
     return scores.reduce((a, b) => a + b, 0) / scores.length
 }
 
-function revenuePerHaYear(strategy: Strategy): number {
-    return (
-        strategy.economics.revenuePerHaYear ??
-        strategy.economics.perHa.revenue / strategy.durationYears
-    )
-}
-
 function StrategyDetail({
     strategy,
     risk,
@@ -125,7 +118,8 @@ function StrategyDetail({
                         {strategy.durationYears}-year plan
                     </span>
                     <span className="tag tag-money">
-                        {formatEur(revenuePerHaYear(strategy))}/ha/yr revenue
+                        {formatEur(strategy.economics.revenuePerHaYear)}/ha/yr
+                        revenue
                     </span>
                     <RiskBadge
                         level={strategy.erosionRisk.level}
@@ -275,7 +269,7 @@ function ComparisonTable({
                             <th scope="row">{s.name}</th>
                             <td>{s.durationYears}</td>
                             <td className="cell-money">
-                                {formatEur(revenuePerHaYear(s))}
+                                {formatEur(s.economics.revenuePerHaYear)}
                             </td>
                             {RATINGS.map(({ key }) => (
                                 <td key={key}>
@@ -469,8 +463,8 @@ function StrategyPage({ selection, crops, plannedCrops }: Props) {
                                     {s.durationYears} years · avg{" "}
                                     {averageScore(s).toFixed(1)}/5
                                 </span>
-                                <span className="option-profit">
-                                    {formatEur(revenuePerHaYear(s))}
+                                <span className="option-revenue">
+                                    {formatEur(s.economics.revenuePerHaYear)}
                                     <small> /ha/yr est. revenue</small>
                                 </span>
                                 <span className="option-risk">

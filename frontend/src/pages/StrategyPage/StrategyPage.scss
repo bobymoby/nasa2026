@@ -850,21 +850,14 @@ $water-axis: 56px;
 
 // ---- economics --------------------------------------------------------------
 
-// diverging pair: gains blue, losses red; the sign is always printed too
-$gain: #2a78d6;
-$loss: #e34948;
-$loss-text: #b91c1c;
-
-.negative {
-    color: $loss-text;
-}
+$revenue: #2a78d6;
 
 .tag-money {
     background-color: #eff6ff;
     color: #1e40af;
 }
 
-.option-profit {
+.option-revenue {
     margin-top: 6px;
     font-size: 15px;
     font-weight: 700;
@@ -875,10 +868,6 @@ $loss-text: #b91c1c;
         font-size: 11px;
         font-weight: 500;
         color: $page-muted;
-    }
-
-    &.negative {
-        color: $loss-text;
     }
 }
 
@@ -931,75 +920,45 @@ $loss-text: #b91c1c;
     letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
     color: $page-text;
-
-    &.negative {
-        color: $loss-text;
-    }
 }
 
-.economics-columns {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 0 32px;
-}
+// ---- revenue chart ----
 
-// ---- profit chart ----
+$revenue-height: 170px;
 
-$profit-height: 170px;
-
-.profit-plot {
-    position: relative;
+.revenue-plot {
     display: grid;
     grid-auto-columns: 1fr;
     grid-auto-flow: column;
     gap: 12px;
-    height: $profit-height;
-    // room for the value labels above and below the bars
-    margin: 20px 0;
+    height: $revenue-height;
+    // room for the value labels above the bars
+    margin-top: 20px;
+    border-bottom: 1px solid #94a3b8;
 }
 
-.profit-zero {
-    position: absolute;
-    left: 0;
-    right: 0;
-    border-top: 1px solid #94a3b8;
-}
-
-.profit-col {
+.revenue-col {
     position: relative;
-    height: 100%;
     display: flex;
+    align-items: flex-end;
     justify-content: center;
 
-    &.hovered .profit-bar {
+    &.hovered .revenue-bar {
         filter: brightness(0.88);
     }
 }
 
-.profit-bar {
-    position: absolute;
+.revenue-bar {
+    position: relative;
     width: 100%;
     max-width: 52px;
     min-height: 2px;
-    // rounded at the data end, square at the zero line
     border-radius: 4px 4px 0 0;
-    background-color: $gain;
+    background-color: $revenue;
     transition: filter $transition;
-
-    &.negative {
-        border-radius: 0 0 4px 4px;
-        background-color: $loss;
-
-        .profit-value {
-            top: 100%;
-            bottom: auto;
-            padding: 4px 0 0;
-            color: $loss-text;
-        }
-    }
 }
 
-.profit-value {
+.revenue-value {
     position: absolute;
     bottom: 100%;
     left: 50%;
@@ -1012,71 +971,24 @@ $profit-height: 170px;
     font-variant-numeric: tabular-nums;
 }
 
-.profit-tooltip {
+.revenue-tooltip {
     top: 0;
     left: 50%;
     transform: translate(-50%, -100%);
     min-width: 150px;
 }
 
-.profit-labels {
+.revenue-labels {
     display: grid;
     grid-auto-columns: 1fr;
     grid-auto-flow: column;
     gap: 12px;
+    margin-top: 6px;
 
     span {
         text-align: center;
         font-size: 12px;
         color: $page-muted;
-    }
-}
-
-// ---- breakdown ----
-
-.cost-breakdown {
-    margin: 0;
-    font-size: 13px;
-    font-variant-numeric: tabular-nums;
-
-    div {
-        display: flex;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 7px 0;
-        border-bottom: 1px solid $page-border;
-    }
-
-    dt {
-        color: $page-muted;
-    }
-
-    dd {
-        margin: 0;
-        font-weight: 500;
-        white-space: nowrap;
-    }
-
-    .revenue dt,
-    .revenue dd {
-        color: $page-text;
-        font-weight: 600;
-    }
-
-    .result {
-        border-bottom: none;
-        border-top: 2px solid $page-text;
-        margin-top: -1px;
-
-        dt,
-        dd {
-            color: $page-text;
-            font-weight: 700;
-        }
-
-        dd.negative {
-            color: $loss-text;
-        }
     }
 }
 
