@@ -14,6 +14,8 @@ from app.services.soilgrids_store import stored_layers
 SOILGRIDS_PROPERTIES_URL = "https://rest.isric.org/soilgrids/v2.0/properties/query"
 SOILGRIDS_RESOLUTION_M = 250
 MAX_RECTANGLE_SAMPLES = 5
+TIMEOUT_STATUS = 504
+TIMEOUT_RETRIES = 1
 DEPTH_INTERVALS = (
     "0-5cm",
     "5-15cm",
@@ -82,6 +84,8 @@ def _fetch_properties(lat: float, lng: float, property_names: tuple[str, ...]) -
     ]
     try:
         response = httpx.get(SOILGRIDS_PROPERTIES_URL, params=params, timeout=60)
+    except httpx.TimeoutException as exc:
+        raise SoilGridsError(f"SoilGrids request failed: {exc}", TIMEOUT_STATUS) from exc
     except httpx.HTTPError as exc:
         raise SoilGridsError(f"SoilGrids request failed: {exc}") from exc
     if response.status_code == 429:
@@ -232,6 +236,30 @@ def _field_sample_points(polygons: list[Polygon]) -> list[tuple[float, float]]:
     return [points[index] for index in indexes]
 
 
+def _sample_points(
+    points: list[tuple[float, float]], property_names: tuple[str, ...]
+) -> tuple[list[list[dict[str, Any]]], list[tuple[float, float]]]:
+    """Samples for the points SoilGrids answered, plus the points it didn't.
+
+    A timed-out point is retried once; the area is described from the points
+    that answered, and only fails when none did."""
+    samples, failed, first_error = [], [], None
+    for lat, lng in points:
+        for attempt in range(1 + TIMEOUT_RETRIES):
+            try:
+                samples.append(_cached_properties(lat, lng, property_names))
+                break
+            except SoilGridsError as exc:
+                if exc.status_code == TIMEOUT_STATUS and attempt < TIMEOUT_RETRIES:
+                    continue
+                first_error = first_error or exc
+                failed.append((lat, lng))
+                break
+    if not samples and first_error is not None:
+        raise first_error
+    return samples, failed
+
+
 def get_soil_selection(
     rect: Rect | None = None,
     polygons: list[Polygon] | None = None,
@@ -253,13 +281,11 @@ def get_soil_selection(
     else:
         raise ValueError("provide a rectangle or at least one field polygon")
 
-    samples = [
-        _cached_properties(lat, lng, tuple(SELECTION_PROPERTIES))
-        for lat, lng in points
-    ]
+    samples, failed = _sample_points(points, tuple(SELECTION_PROPERTIES))
     sampling: dict[str, Any] = {
         "method": method,
-        "sample_count": len(points),
+        "sample_count": len(samples),
+        "failed_sample_count": len(failed),
         "max_sample_count": MAX_RECTANGLE_SAMPLES,
         "sampled_points": [{"lat": lat, "lng": lng} for lat, lng in points],
         "aggregation": "arithmetic mean of available point estimates by depth",
@@ -276,6 +302,8 @@ def get_soil_selection(
         "note": (
             "SoilGrids values are modeled estimates at approximately 250 m "
             "resolution, not measurements from the selected fields."
+            + (f" {len(failed)} of {len(points)} sample points could not be read."
+               if failed else "")
         ),
     }
     if location is not None:

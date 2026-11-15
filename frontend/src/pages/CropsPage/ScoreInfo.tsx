@@ -36,10 +36,16 @@ function ScoreInfo({ cells }: { cells: string }) {
                     <h4>Suitability</h4>
                     <p>
                         FAO GAEZ v4 rating for rainfed farming (1981–2010
-                        climate, high input level; {cells}). “Suited to this
-                        area” lists crops rated at least medium (
-                        {MIN_SUITABILITY} / 100). “All GAEZ crops” lets you
-                        browse the complete set.
+                        climate, high input level; {cells}). Only crops rated at
+                        least medium ({MIN_SUITABILITY} / 100) are listed. The
+                        yield under it is the attainable yield.
+                    </p>
+                    <h4>Soil health</h4>
+                    <p>
+                        0–100. Nitrogen added, organic matter, ground cover and
+                        break-crop value add to it; soil disturbance and harvest
+                        removal or compaction take away. Hover a row on a card
+                        for its range.
                     </p>
                     <h4>Soil profile</h4>
                     <p>

@@ -15,6 +15,7 @@ import math
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import asdict, dataclass
 from datetime import date, timedelta
 
@@ -55,6 +56,8 @@ DEM_MAX_PX = 512
 SLOPE_LENGTH_M = 100.0
 PRICE_REFERENCE_YEARS = 5
 WORKERS = 6
+# parts still loading after this are left out and keep warming the caches
+CONTEXT_DEADLINE_S = 20.0
 DB_TIMEOUT = 5
 DB_RETRY_S = 60
 
@@ -422,6 +425,15 @@ def site_context(sh: SentinelHub, outlines: list[tuple[str | None, list[tuple[fl
             errors.append(f"{name}: {e}")
             return None
 
+    deadline = time.monotonic() + CONTEXT_DEADLINE_S
+
+    def collect(name: str, fut: Future):
+        try:
+            return fut.result(timeout=max(0.0, deadline - time.monotonic()))
+        except FutureTimeout:
+            errors.append(f"{name}: still loading after {CONTEXT_DEADLINE_S:.0f} s, left out")
+            return None
+
     with timed("site context", logging.INFO, plots=len(outlines)):
         sites = [_pool.submit(plot_site, sh, plot_cache_key(pid, pts, 0), poly)
                  for (pid, pts), poly in zip(outlines, polys)]
@@ -435,23 +447,27 @@ def site_context(sh: SentinelHub, outlines: list[tuple[str | None, list[tuple[fl
         price = _pool.submit(guarded, "prices", _prices, country) if country else None
 
         plots = []
-        gaez_by_plot = suitability.result() or [{} for _ in polys]
+        gaez_by_plot = collect("gaez", suitability) or [{} for _ in polys]
         for (pid, _), site_f, hist_f, gz in zip(outlines, sites, histories, gaez_by_plot):
+            site_dict = None
             try:
-                site, site_errors = site_f.result()
-                errors.extend(site_errors)
-                site_dict = asdict(site)
+                got = collect("plot", site_f)
+                if got is not None:
+                    site, site_errors = got
+                    errors.extend(site_errors)
+                    site_dict = asdict(site)
             except Exception as e:
                 errors.append(f"plot: {e}")
-                site_dict = None
-            plots.append({"id": pid, "site": site_dict, "previous_season": hist_f.result(), "crops": gz})
+            plots.append({"id": pid, "site": site_dict, "previous_season": collect("history", hist_f), "crops": gz})
+        climate_value = collect("climate", climate)
+        price_value = collect("prices", price) if price else None
 
     return {
         "country": country,
-        "climate": climate.result(),
-        "prices": price.result() if price else None,
+        "climate": climate_value,
+        "prices": price_value,
         "plots": plots,
-        "errors": errors,
+        "errors": list(errors),
     }
 
 

@@ -1,6 +1,32 @@
 import { AreaSelection } from "../data/point"
 import { API_URL } from "./apiUrl"
 
+// the backend gives up on slow site sources after 20 s; this covers a hung server
+const CONTEXT_TIMEOUT_MS = 30_000
+
+function areaBody(selection: AreaSelection) {
+    return selection.kind === "bounds"
+        ? { bounds: selection.bounds }
+        : { fields: selection.fields }
+}
+
+// crops with complete planning data (agronomy, prices, yields, costs) for the area
+export async function fetchPlannableCrops(
+    selection: AreaSelection,
+    signal?: AbortSignal,
+): Promise<string[]> {
+    const res = await fetch(`${API_URL}/api/strategies/crops`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(areaBody(selection)),
+        signal,
+    })
+    if (!res.ok)
+        throw new Error(`Failed to load plannable crops (${res.status})`)
+    const data: { crops: string[] } = await res.json()
+    return data.crops
+}
+
 export type Level = "low" | "medium" | "high" | "unknown"
 export type PlantingRole = "cash" | "cover" | "forage"
 export type Trait =
@@ -24,41 +50,28 @@ export type Planting = {
 export type Rating = { score: number; summary: string }
 export type Assessment = { level: Level; summary: string }
 
-export type Money = {
-    revenue: number
-    seedCost: number
-    operatingCost: number
-    totalCost: number
-    profit: number
-}
-
-// estimates in EUR; perHa is one pass through the rotation
+// gross revenue in EUR; revenuePerHa is one pass through the rotation
 export type Economics = {
     currency: "EUR"
     // ISO alpha-2 country whose market figures are used
     country: string
-    // price normalization year for Eurostat/FAOSTAT reference prices
-    priceYear: number | null
-    // false when a crop lacks a published yield, price or cost estimate and is left out of the totals
-    complete: boolean
-    missingData: string[]
+    // prices are real euros of this year
+    priceYear: number
     areaHa: number
-    perHa: Money
-    profitPerHaYear: number
-    // perHa scaled to the selected area
-    total: Money
+    revenuePerHa: number
+    revenuePerHaYear: number
+    // revenuePerHa over the whole rotation, scaled to the selected area
+    totalRevenue: number
     plantings: {
         cropName: string
         role: PlantingRole
-        yieldTHa: number | null
-        priceEurT: number | null
+        yieldTHa: number
+        priceEurT: number
         revenue: number
-        cost: number
-        profit: number
-        // "price eurostat 2020–2024, yield eurostat 2021–2025", "no market data", "no cost estimate" or "no harvest"
+        // "price eurostat 2020–2024, yield eurostat 2021–2025"
         source: string
     }[]
-    byYear: { year: number; revenue: number; cost: number; profit: number }[]
+    byYear: { year: number; revenue: number }[]
 }
 
 export type Strategy = {
@@ -91,10 +104,6 @@ export type Strategy = {
 }
 
 export type StrategiesResult = {
-    dataMode:
-        | "illustrative_mock"
-        | "mixed_service_and_mock"
-        | "mixed_dataset_and_mock"
     assumptions: string[]
     strategies: Strategy[]
 }
@@ -104,24 +113,38 @@ export async function fetchStrategies(
     crops: string[],
     signal?: AbortSignal,
 ): Promise<StrategiesResult> {
-    const area =
-        selection.kind === "bounds"
-            ? { bounds: selection.bounds }
-            : { fields: selection.fields }
+    const area = areaBody(selection)
     const contextArea =
         selection.kind === "bounds"
             ? {
-                  plots: [[
-                      [selection.bounds.topLeft.lat, selection.bounds.topLeft.lng],
-                      [selection.bounds.topLeft.lat, selection.bounds.bottomRight.lng],
-                      [selection.bounds.bottomRight.lat, selection.bounds.bottomRight.lng],
-                      [selection.bounds.bottomRight.lat, selection.bounds.topLeft.lng],
-                  ]],
+                  plots: [
+                      [
+                          [
+                              selection.bounds.topLeft.lat,
+                              selection.bounds.topLeft.lng,
+                          ],
+                          [
+                              selection.bounds.topLeft.lat,
+                              selection.bounds.bottomRight.lng,
+                          ],
+                          [
+                              selection.bounds.bottomRight.lat,
+                              selection.bounds.bottomRight.lng,
+                          ],
+                          [
+                              selection.bounds.bottomRight.lat,
+                              selection.bounds.topLeft.lng,
+                          ],
+                      ],
+                  ],
               }
             : { fields: selection.fields }
 
     let siteContext: unknown
-    const contextWarnings: string[] = []
+    const context = new AbortController()
+    const abortContext = () => context.abort()
+    signal?.addEventListener("abort", abortContext)
+    const timer = setTimeout(abortContext, CONTEXT_TIMEOUT_MS)
     try {
         const contextResponse = await fetch(
             `${API_URL}/api/fields/strategy-context`,
@@ -129,22 +152,23 @@ export async function fetchStrategies(
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(contextArea),
-                signal,
+                signal: context.signal,
             },
         )
         if (!contextResponse.ok) {
-            const detail = await contextResponse.text().catch(() => "")
-            contextWarnings.push(
-                `Field data context request failed (${contextResponse.status})${detail ? `: ${detail}` : ""}`,
+            throw new Error(
+                `Failed to load field data (${contextResponse.status})`,
             )
-        } else {
-            siteContext = await contextResponse.json()
         }
+        siteContext = await contextResponse.json()
     } catch (error) {
-        if (signal?.aborted) throw error
-        contextWarnings.push(
-            `Field data context could not be fetched: ${error instanceof Error ? error.message : String(error)}`,
+        if (signal?.aborted || !context.signal.aborted) throw error
+        throw new Error(
+            `Field data took longer than ${CONTEXT_TIMEOUT_MS / 1000} s to load; try again.`,
         )
+    } finally {
+        clearTimeout(timer)
+        signal?.removeEventListener("abort", abortContext)
     }
 
     const res = await fetch(`${API_URL}/api/strategies`, {
@@ -153,8 +177,7 @@ export async function fetchStrategies(
         body: JSON.stringify({
             crops,
             ...area,
-            ...(siteContext ? { siteContext } : {}),
-            contextWarnings,
+            siteContext,
         }),
         signal,
     })

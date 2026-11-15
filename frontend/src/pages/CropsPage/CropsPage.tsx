@@ -12,8 +12,11 @@ import { Link } from "react-router"
 import {
     CropsResult,
     fetchCrops,
+    fetchSoilScores,
     MIN_SUITABILITY,
+    SoilScoredCrop,
 } from "../../api/fetchCrops"
+import { fetchPlannableCrops } from "../../api/fetchStrategies"
 import { AreaSelection, describeSelection } from "../../data/point"
 import CropCard from "./CropCard"
 import ScoreInfo from "./ScoreInfo"
@@ -24,13 +27,14 @@ import { useSmoothHorizontalScroll } from "./useSmoothHorizontalScroll"
 // smallest height a card fits in; keep in sync with the card styles
 const MIN_CARD_HEIGHT = 250
 const GRID_GAP = 12
-const FALLBACK_COUNT = 12
 
-type SortKey = "suitability" | "name"
-type View = "suited" | "all"
+type SortKey = "suitability" | "soil" | "name"
 
 const SORTERS: Record<SortKey, (a: ListedCrop, b: ListedCrop) => number> = {
-    suitability: (a, b) => b.gaez.suitability - a.gaez.suitability,
+    suitability: (a, b) =>
+        b.gaez.suitability - a.gaez.suitability ||
+        (b.soil?.score ?? -1) - (a.soil?.score ?? -1),
+    soil: (a, b) => (b.soil?.score ?? -1) - (a.soil?.score ?? -1),
     name: (a, b) => a.name.localeCompare(b.name),
 }
 
@@ -43,10 +47,13 @@ type Props = {
 function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
     const [gaez, setGaez] = useState<CropsResult | null>(null)
     const [gaezError, setGaezError] = useState<string | null>(null)
+    const [soil, setSoil] = useState<SoilScoredCrop[] | null>(null)
+    const [soilError, setSoilError] = useState<string | null>(null)
+    const [plannable, setPlannable] = useState<Set<string> | null>(null)
+    const [plannableError, setPlannableError] = useState<string | null>(null)
     const [reloadKey, setReloadKey] = useState(0)
     const [query, setQuery] = useState("")
     const [sort, setSort] = useState<SortKey>("suitability")
-    const [view, setView] = useState<View>("suited")
     const deferredQuery = useDeferredValue(query)
 
     useEffect(() => {
@@ -62,34 +69,54 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
         return () => controller.abort()
     }, [selection, reloadKey])
 
+    useEffect(() => {
+        const controller = new AbortController()
+        setSoilError(null)
+        fetchSoilScores(controller.signal)
+            .then(setSoil)
+            .catch((err) => {
+                if (controller.signal.aborted) return
+                setSoilError(err instanceof Error ? err.message : String(err))
+            })
+        return () => controller.abort()
+    }, [reloadKey])
+
+    // only crops the strategy planner has complete data for
+    useEffect(() => {
+        const controller = new AbortController()
+        setPlannable(null)
+        setPlannableError(null)
+        fetchPlannableCrops(selection, controller.signal)
+            .then((ids) => setPlannable(new Set(ids)))
+            .catch((err) => {
+                if (controller.signal.aborted) return
+                setPlannableError(
+                    err instanceof Error ? err.message : String(err),
+                )
+            })
+        return () => controller.abort()
+    }, [selection, reloadKey])
+
     const all = useMemo(
-        () => listCrops(gaez?.crops ?? null),
-        [gaez],
+        () =>
+            listCrops(gaez?.crops ?? null, soil).filter((c) =>
+                plannable?.has(c.id),
+            ),
+        [gaez, soil, plannable],
     )
 
     // Drop picked crops not offered for this area after suitability loads.
     useEffect(() => {
-        if (!gaez) return
+        if (!gaez || !plannable) return
         const available = new Set(all.map((c) => c.id))
         const kept = selectedCrops.filter((id) => available.has(id))
         if (kept.length !== selectedCrops.length) onSelectedCropsChange(kept)
-    }, [all, gaez, selectedCrops, onSelectedCropsChange])
+    }, [all, gaez, plannable, selectedCrops, onSelectedCropsChange])
 
-    const { shown, fallback } = useMemo(() => {
-        const suited = all.filter(
-            (c) => c.gaez.suitability >= MIN_SUITABILITY,
-        )
-        if (view === "all") {
-            return { shown: all, fallback: false }
-        }
-        if (suited.length > 0 || all.length === 0) {
-            return { shown: suited, fallback: false }
-        }
-        const best = [...all]
-            .sort((a, b) => b.gaez.suitability - a.gaez.suitability)
-            .slice(0, FALLBACK_COUNT)
-        return { shown: best, fallback: true }
-    }, [all, view])
+    const shown = useMemo(
+        () => all.filter((c) => c.gaez.suitability >= MIN_SUITABILITY),
+        [all],
+    )
 
     const filtered = useMemo(() => {
         const words = deferredQuery.toLowerCase().split(/\s+/).filter(Boolean)
@@ -98,7 +125,7 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
             .sort(SORTERS[sort])
     }, [shown, deferredQuery, sort])
 
-    const ready = gaez !== null
+    const ready = gaez !== null && plannable !== null
 
     const scrollerRef = useRef<HTMLDivElement>(null)
     const scroller = useSmoothHorizontalScroll(scrollerRef, [ready])
@@ -154,7 +181,7 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
     }, [])
     const selectedSet = useMemo(() => new Set(selectedCrops), [selectedCrops])
 
-    const errors = [gaezError].filter(Boolean)
+    const errors = [gaezError, soilError, plannableError].filter(Boolean)
     const cells = gaez
         ? gaez.cells === 1
             ? "one ~9 km grid cell"
@@ -184,26 +211,6 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
             )}
 
             <div className="crops-toolbar">
-                <div className="crops-view" role="tablist">
-                    <button
-                        type="button"
-                        role="tab"
-                        aria-selected={view === "suited"}
-                        className={view === "suited" ? "active" : undefined}
-                        onClick={() => setView("suited")}
-                    >
-                        Suited to this area
-                    </button>
-                    <button
-                        type="button"
-                        role="tab"
-                        aria-selected={view === "all"}
-                        className={view === "all" ? "active" : undefined}
-                        onClick={() => setView("all")}
-                    >
-                        All GAEZ crops
-                    </button>
-                </div>
                 <input
                     type="search"
                     className="crops-search"
@@ -219,6 +226,7 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
                         onChange={(e) => setSort(e.target.value as SortKey)}
                     >
                         <option value="suitability">Suitability</option>
+                        <option value="soil">Soil health</option>
                         <option value="name">Name, A–Z</option>
                     </select>
                 </label>
@@ -258,14 +266,6 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
                 <p className="crops-loading">
                     Checking which crops suit this area… a new area takes up to
                     ~10 s.
-                </p>
-            )}
-            {ready && fallback && (
-                <p className="crops-fallback">
-                    No crop is rated medium ({MIN_SUITABILITY} / 100) or better
-                    for this area, so the {shown.length} best-rated crops are
-                    shown. Expect lower yields than the suitability scale
-                    suggests for a good site.
                 </p>
             )}
             {ready && filtered.length === 0 && (

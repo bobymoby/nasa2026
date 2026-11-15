@@ -17,8 +17,6 @@ Backend (run from `backend/`, virtualenv at `backend/.venv`):
 ```sh
 .venv/bin/pip install -r requirements.txt
 .venv/bin/fastapi dev app/main.py                      # http://localhost:8000, docs at /docs
-.venv/bin/python -m unittest discover -s tests -p "test_*.py"
-.venv/bin/python -m unittest tests.test_soilgrids.SoilGridsEndpointTests   # single test class
 ```
 
 Frontend (run from `frontend/`):
