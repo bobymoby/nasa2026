@@ -321,6 +321,10 @@ $grid-gap: 12px; // GRID_GAP in CropsPage.tsx
 
 // ---- crop card --------------------------------------------------------------
 
+$soil-good: $accent;
+$soil-bad: #e34948;
+$soil-bad-text: #b91c1c;
+
 .crop-head {
     display: flex;
     align-items: center;
@@ -403,6 +407,77 @@ $grid-gap: 12px; // GRID_GAP in CropsPage.tsx
     white-space: nowrap;
     font-size: 15px;
     font-weight: 600;
+}
+
+.soil-impact {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-weight: 400;
+}
+
+.soil-components {
+    display: grid;
+    gap: 2px;
+    line-height: 16px;
+    margin: 0;
+    font-size: 12px;
+
+    > div {
+        display: grid;
+        grid-template-columns: 1fr 112px;
+        align-items: center;
+        gap: 8px;
+    }
+
+    dt {
+        color: $page-muted;
+    }
+
+    dd {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 0;
+    }
+}
+
+.component-track {
+    flex: 1;
+    height: 6px;
+    border-radius: 2px;
+    background-color: #f1f5f9;
+    overflow: hidden;
+
+    span {
+        display: block;
+        height: 100%;
+        border-radius: 2px;
+        background-color: $soil-good;
+    }
+
+    // harm grows from the right so it reads as "taking away"
+    &.negative {
+        display: flex;
+        justify-content: flex-end;
+
+        span {
+            background-color: $soil-bad;
+        }
+    }
+}
+
+.component-value {
+    width: 26px;
+    text-align: right;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: $page-text;
+
+    &.negative {
+        color: $soil-bad-text;
+    }
 }
 
 // ---- search & filters -------------------------------------------------------
@@ -626,16 +701,6 @@ $grid-gap: 12px; // GRID_GAP in CropsPage.tsx
             cursor: default;
         }
     }
-}
-
-.crops-fallback {
-    margin: 10px 0 0;
-    padding: 8px 12px;
-    border-radius: $radius-sm;
-    border: 1px solid #fde68a;
-    background-color: #fffbeb;
-    color: #92400e;
-    font-size: 13px;
 }
 
 .crops-loading {

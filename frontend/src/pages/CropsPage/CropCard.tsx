@@ -1,5 +1,6 @@
 import { memo } from "react"
 
+import SoilImpactCard from "./SoilImpactCard"
 import { CLASS_LABELS, formatYield, ListedCrop } from "./listedCrops"
 
 // memoised: the grid holds every crop, so ticking one box or typing in the
@@ -13,7 +14,7 @@ const CropCard = memo(function CropCard({
     checked: boolean
     onToggle: (id: string) => void
 }) {
-    const { gaez } = crop
+    const { gaez, soil } = crop
     return (
         <li>
             <label>
@@ -44,7 +45,21 @@ const CropCard = memo(function CropCard({
                             <span>{formatYield(gaez) ?? "/ 100"}</span>
                         </span>
                     </span>
+                    <span
+                        className="crop-stat"
+                        title="How the crop treats the soil (crop_soil_scores)"
+                    >
+                        <span className="crop-stat-value">
+                            {soil?.score ?? "–"}
+                        </span>
+                        <span className="crop-stat-text">
+                            <span>Soil health</span>
+                            <span>{soil ? "/ 100" : "no soil data"}</span>
+                        </span>
+                    </span>
                 </span>
+
+                {soil && <SoilImpactCard soil={soil} />}
             </label>
         </li>
     )

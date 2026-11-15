@@ -76,7 +76,7 @@ function SoilLegend({
     if (classes.length === 0) {
         return (
             <div className="soil-legend-empty">
-                No soil data in view (water or built-up area).
+                No soil data in view (outside Bulgaria, water or built-up area).
             </div>
         )
     }

@@ -890,12 +890,6 @@ $loss-text: #b91c1c;
     }
 }
 
-.economics-columns {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 0 32px;
-}
-
 // ---- profit chart ----
 
 $profit-height: 170px;
@@ -987,52 +981,6 @@ $profit-height: 170px;
 
 // ---- breakdown ----
 
-.cost-breakdown {
-    margin: 0;
-    font-size: 13px;
-    font-variant-numeric: tabular-nums;
-
-    div {
-        display: flex;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 7px 0;
-        border-bottom: 1px solid $page-border;
-    }
-
-    dt {
-        color: $page-muted;
-    }
-
-    dd {
-        margin: 0;
-        font-weight: 500;
-        white-space: nowrap;
-    }
-
-    .revenue dt,
-    .revenue dd {
-        color: $page-text;
-        font-weight: 600;
-    }
-
-    .result {
-        border-bottom: none;
-        border-top: 2px solid $page-text;
-        margin-top: -1px;
-
-        dt,
-        dd {
-            color: $page-text;
-            font-weight: 700;
-        }
-
-        dd.negative {
-            color: $loss-text;
-        }
-    }
-}
-
 // ---- per-crop table ----
 
 .economics-table {
@@ -1083,17 +1031,6 @@ $profit-height: 170px;
     margin-right: 8px;
     border-radius: 50%;
     vertical-align: middle;
-}
-
-.economics-warning {
-    margin: 0 0 12px;
-    padding: 10px 12px;
-    border: 1px solid rgb(251 191 36 / 45%);
-    border-radius: $radius-sm;
-    background: rgb(251 191 36 / 12%);
-    font-size: 13px;
-    line-height: 1.5;
-    color: $page-text;
 }
 
 .economics-note {

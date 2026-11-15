@@ -87,6 +87,7 @@ class YieldRef:
     t_ha: float
     years: tuple[int, int]
     source: str
+    cv: float | None = None
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,8 @@ class CropMarket:
     yield_t_ha: float | None = None
     yield_years: tuple[int, int] | None = None
     yield_source: str | None = None
+    price_cv: float | None = None
+    yield_cv: float | None = None
 
 
 @dataclass(frozen=True)
@@ -369,13 +372,20 @@ def _sources(names) -> str:
 
 
 def reference_yield(rows: list[tuple[int, float, str]], reference_years: int = REFERENCE_YEARS) -> YieldRef | None:
-    recent = sorted(rows)[-reference_years:]
+    rows = sorted(rows)
+    recent = rows[-reference_years:]
     if not recent:
         return None
+    window = [t for _, t, _ in rows[-VARIABILITY_YEARS:]]
+    cv = (
+        round(statistics.pstdev(window) / statistics.fmean(window), 3)
+        if len(window) >= MIN_VARIABILITY_YEARS else None
+    )
     return YieldRef(
         round(statistics.fmean(t for _, t, _ in recent), 2),
         (recent[0][0], recent[-1][0]),
         _sources(src for _, _, src in recent),
+        cv,
     )
 
 
@@ -406,6 +416,7 @@ def market_reference(code: str, crop_ids: list[str]) -> Market:
                 price_years=tuple(s["reference_years"]),
                 price_source=_sources(r.source for r in s["history"][-REFERENCE_YEARS:]),
                 price_confidence=s["confidence"],
+                price_cv=s["variability"]["cv"] if s["variability"] else None,
             )
     except PriceSourceError as e:
         log.warning("market reference: no prices for %s: %s", code, e)
@@ -418,7 +429,9 @@ def market_reference(code: str, crop_ids: list[str]) -> Market:
     for crop_id in crop_ids:
         price, ref = prices.get(crop_id, CropMarket()), yields.get(crop_id)
         if ref:
-            price = replace(price, yield_t_ha=ref.t_ha, yield_years=ref.years, yield_source=ref.source)
+            price = replace(
+                price, yield_t_ha=ref.t_ha, yield_years=ref.years, yield_source=ref.source, yield_cv=ref.cv,
+            )
         if price != CropMarket():
             crops[crop_id] = price
     return Market(code.upper(), price_year, crops)

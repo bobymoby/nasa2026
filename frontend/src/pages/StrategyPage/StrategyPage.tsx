@@ -11,7 +11,7 @@ import {
     StrategiesResult,
 } from "../../api/fetchStrategies"
 import { AreaSelection, describeSelection } from "../../data/point"
-import EconomicsSection, { formatSigned } from "./EconomicsSection"
+import EconomicsSection, { formatEur } from "./EconomicsSection"
 import RotationTimeline from "./RotationTimeline"
 import WaterChart from "./WaterChart"
 import { humanize, LEVEL_LABELS } from "./labels"
@@ -114,8 +114,8 @@ function StrategyDetail({
                         {strategy.durationYears}-year plan
                     </span>
                     <span className="tag tag-money">
-                        {formatSigned(strategy.economics.profitPerHaYear)}/ha/yr
-                        profit
+                        {formatEur(strategy.economics.revenuePerHaYear)}/ha/yr
+                        revenue
                     </span>
                     <RiskBadge
                         level={strategy.erosionRisk.level}
@@ -146,7 +146,7 @@ function StrategyDetail({
             </section>
 
             <section>
-                <h3>Estimated cost and profit</h3>
+                <h3>Estimated revenue</h3>
                 <EconomicsSection
                     economics={strategy.economics}
                     years={strategy.durationYears}
@@ -240,7 +240,7 @@ function ComparisonTable({
                     <tr>
                         <th>Strategy</th>
                         <th>Years</th>
-                        <th>Profit €/ha/yr</th>
+                        <th>Revenue €/ha/yr</th>
                         {RATINGS.map(({ key, label }) => (
                             <th key={key}>{label}</th>
                         ))}
@@ -260,10 +260,8 @@ function ComparisonTable({
                         >
                             <th scope="row">{s.name}</th>
                             <td>{s.durationYears}</td>
-                            <td
-                                className={`cell-money${s.economics.profitPerHaYear < 0 ? " negative" : ""}`}
-                            >
-                                {formatSigned(s.economics.profitPerHaYear)}
+                            <td className="cell-money">
+                                {formatEur(s.economics.revenuePerHaYear)}
                             </td>
                             {RATINGS.map(({ key }) => (
                                 <td key={key}>
@@ -296,7 +294,7 @@ function StrategyPage({ selection, crops, currentCrops }: Props) {
     const [strategies, setStrategies] = useState<Strategy[] | null>(null)
     const [strategySources, setStrategySources] = useState<Pick<
         StrategiesResult,
-        "dataMode" | "assumptions"
+        "assumptions"
     > | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [reloadKey, setReloadKey] = useState(0)
@@ -312,10 +310,7 @@ function StrategyPage({ selection, crops, currentCrops }: Props) {
         fetchStrategies(selection, crops, currentCrops, controller.signal)
             .then((result) => {
                 setStrategies(result.strategies)
-                setStrategySources({
-                    dataMode: result.dataMode,
-                    assumptions: result.assumptions,
-                })
+                setStrategySources({ assumptions: result.assumptions })
                 setSelectedId(result.strategies[0]?.id ?? null)
             })
             .catch((err) => {
@@ -395,11 +390,7 @@ function StrategyPage({ selection, crops, currentCrops }: Props) {
 
             {strategySources && (
                 <details className="strategy-assumptions">
-                    <summary>
-                        {strategySources.dataMode !== "illustrative_mock"
-                            ? "Data sources and model assumptions"
-                            : "Illustrative model assumptions"}
-                    </summary>
+                    <summary>Data sources and model assumptions</summary>
                     <ul>
                         {strategySources.assumptions.map((assumption) => (
                             <li key={assumption}>{assumption}</li>
@@ -453,11 +444,9 @@ function StrategyPage({ selection, crops, currentCrops }: Props) {
                                     {s.durationYears} years · avg{" "}
                                     {averageScore(s).toFixed(1)}/5
                                 </span>
-                                <span
-                                    className={`option-profit${s.economics.profitPerHaYear < 0 ? " negative" : ""}`}
-                                >
-                                    {formatSigned(s.economics.profitPerHaYear)}
-                                    <small> /ha/yr est. profit</small>
+                                <span className="option-profit">
+                                    {formatEur(s.economics.revenuePerHaYear)}
+                                    <small> /ha/yr est. revenue</small>
                                 </span>
                                 <span className="option-risk">
                                     <RiskSummary state={risks[s.id]} />
