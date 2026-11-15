@@ -71,10 +71,7 @@ def soil_at_point(
     }
 
 
-@router.get(
-    "/legend",
-    summary="Share of each most probable WRB soil group over a rectangle (Bulgaria)",
-)
+@router.get("/legend", summary="Share of each most probable WRB soil group over a rectangle (Bulgaria)")
 def soil_legend(rect: RectQuery) -> list[dict]:
     try:
         shares = group_shares(rect.west, rect.south, rect.east, rect.north)
@@ -115,7 +112,10 @@ def soil_selection(request: SoilSelectionRequest) -> dict:
     if request.bounds is not None:
         top_left = request.bounds.top_left
         bottom_right = request.bounds.bottom_right
-        if top_left.lat <= bottom_right.lat or top_left.lng >= bottom_right.lng:
+        if (
+            top_left.lat <= bottom_right.lat
+            or top_left.lng >= bottom_right.lng
+        ):
             raise HTTPException(
                 422,
                 "topLeft must be north-west of bottomRight",
@@ -131,13 +131,12 @@ def soil_selection(request: SoilSelectionRequest) -> dict:
     polygons = []
     for field in request.fields:
         try:
-            polygon = plot_polygon([(point.lat, point.lng) for point in field.polygon])
+            polygons.append(plot_polygon([(point.lat, point.lng) for point in field.polygon]))
         except ValueError as e:
-            raise HTTPException(
-                422, f"Field {field.id} has an invalid polygon: {e}"
-            ) from e
-        polygons.append(polygon)
-    return _soilgrids_response(lambda: get_soil_selection(polygons=polygons))
+            raise HTTPException(422, f"Field {field.id} has an invalid polygon: {e}") from e
+    return _soilgrids_response(
+        lambda: get_soil_selection(polygons=polygons)
+    )
 
 
 @router.get(
