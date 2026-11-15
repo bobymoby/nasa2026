@@ -13,7 +13,7 @@ from functools import cache
 from itertools import islice, permutations, product
 from typing import Any
 
-from app.services import agronomy, drought
+from app.services import agronomy, crop_calendar, drought
 
 DEEP_ROOTING_THRESHOLD_M = 1.2
 
@@ -31,6 +31,7 @@ class CropProfile:
     return_gap_positions: int = 3
     family_gap_positions: int = 1
     role: str = "cash"
+    gridded_calendar: bool = False
 
     @property
     def duration_months(self) -> int:
@@ -52,8 +53,8 @@ def _traits(record: agronomy.AgronomyCrop) -> tuple[str, ...]:
     return tuple(traits)
 
 
-def _profile(record: agronomy.AgronomyCrop, frost: agronomy.Frost | None = None) -> CropProfile:
-    phenology = agronomy.water_crop(record, frost)
+def _profile(record: agronomy.AgronomyCrop, calendar: agronomy.Calendar | None = None) -> CropProfile:
+    phenology = agronomy.water_crop(record, calendar)
     return CropProfile(
         id=record.crop_id,
         name=record.name,
@@ -64,6 +65,7 @@ def _profile(record: agronomy.AgronomyCrop, frost: agronomy.Frost | None = None)
         traits=_traits(record),
         return_gap_positions=max(1, record.min_return_years),
         role=record.role,
+        gridded_calendar=calendar is not None and calendar.is_gridded(record.crop_id),
     )
 
 
@@ -109,6 +111,14 @@ STRATEGY_NAMES = {
     "water_efficient": ("Water-efficient", "Favors lower water demand and revenue per water unit."),
     "balanced": ("Balanced", "Balances revenue, soil benefit, risk, water efficiency, and feasibility."),
 }
+GRIDDED_NOTE = (
+    f"Sowing and harvest from the {crop_calendar.SOURCE} for this 0.5° cell; "
+    "family and traits from crop_agronomy.csv."
+)
+TABLE_NOTE = (
+    "No observed gridded calendar for this crop here: sowing and harvest from the typical "
+    "calendar in crop_agronomy.csv, shifted to this area's frost dates."
+)
 DEFAULT_BASELINE = ("wheat", "sunflower", "barley", "chickpea", "rapeseed")
 MIN_SUITABILITY = 25.0
 MAX_FALLOW_MONTHS = 10
@@ -117,7 +127,7 @@ MAX_ROTATIONS = 5000
 
 def _crop_profile(
     value: CropProfile | str | dict[str, Any],
-    frost: agronomy.Frost | None = None,
+    calendar: agronomy.Calendar | None = None,
 ) -> CropProfile:
     if isinstance(value, CropProfile):
         profile = value
@@ -126,21 +136,26 @@ def _crop_profile(
         if crop_id not in CROP_BY_ID:
             raise ValueError(f"Unknown crop id: {crop_id}")
         profile = CROP_BY_ID[crop_id]
-    if frost is None:
+    if calendar is None:
         return profile
-    shifted = _profile(agronomy.crops()[profile.id], frost)
-    return replace(profile, sow_month=shifted.sow_month, harvest_month=shifted.harvest_month)
+    shifted = _profile(agronomy.crops()[profile.id], calendar)
+    return replace(
+        profile,
+        sow_month=shifted.sow_month,
+        harvest_month=shifted.harvest_month,
+        gridded_calendar=shifted.gridded_calendar,
+    )
 
 
 def crop_et_demand_mm(
     crop_id: str,
     et0_monthly_mm: dict[int, float],
-    frost: agronomy.Frost | None = None,
+    calendar: agronomy.Calendar | None = None,
 ) -> float | None:
     record = agronomy.crops().get(crop_id)
     if record is None:
         return None
-    return drought.reference_crop_et_mm(agronomy.water_crop(record, frost), et0_monthly_mm)
+    return drought.reference_crop_et_mm(agronomy.water_crop(record, calendar), et0_monthly_mm)
 
 
 @cache
@@ -174,10 +189,10 @@ def _available(crops: list[CropProfile], territory: dict[str, Any]) -> list[Crop
 def _rotation_constraint_penalty(
     sequence: tuple[CropProfile, ...],
     history: list[str],
-    frost: agronomy.Frost | None = None,
+    calendar: agronomy.Calendar | None = None,
 ) -> float:
     prior_crops = [
-        (index, _crop_profile(crop_id, frost))
+        (index, _crop_profile(crop_id, calendar))
         for index, crop_id in enumerate(history)
         if crop_id in CROP_BY_ID
     ]
@@ -250,8 +265,8 @@ def generate_valid_rotations(
     """
     if years < 1:
         raise ValueError("years must be at least 1")
-    frost = territory.get("frost")
-    profiles = [_crop_profile(crop, frost) for crop in crops]
+    calendar = territory.get("calendar")
+    profiles = [_crop_profile(crop, calendar) for crop in crops]
     available = _available(profiles, territory)
     if not available:
         return []
@@ -310,7 +325,7 @@ def generate_valid_rotations(
             "crop_ids": [crop.id for crop in sequence],
             "schedule": schedule,
             "rotation_constraint_penalty": _rotation_constraint_penalty(
-                sequence, history, frost
+                sequence, history, calendar
             ),
         })
     return rotations
@@ -359,12 +374,12 @@ def _metrics(rotation: dict[str, Any], territory: dict[str, Any]) -> dict[str, A
     }
 
 
-def schedule_fits(crop_ids: list[str], frost: agronomy.Frost | None = None) -> bool:
-    return _schedule(tuple(_crop_profile(c, frost) for c in crop_ids)) is not None
+def schedule_fits(crop_ids: list[str], calendar: agronomy.Calendar | None = None) -> bool:
+    return _schedule(tuple(_crop_profile(c, calendar) for c in crop_ids)) is not None
 
 
 def _baseline_metrics(baseline: list[str], territory: dict[str, Any]) -> dict[str, Any]:
-    crops = [_crop_profile(crop, territory.get("frost")) for crop in baseline]
+    crops = [_crop_profile(crop, territory.get("calendar")) for crop in baseline]
     schedule = _schedule(tuple(crops))
     if schedule is None:
         raise ValueError("baseline rotation contains incompatible growing seasons")
@@ -437,7 +452,7 @@ def _to_legacy_shape(
                 "end": {"year": item["end"][0], "month": item["end"][1]},
                 "water_use_mm": round(water_demands[crop.id]),
                 "traits": list(crop.traits),
-                "note": "Calendar, family and traits from crop_agronomy.csv.",
+                "note": GRIDDED_NOTE if crop.gridded_calendar else TABLE_NOTE,
             }
             for item, crop in zip(rotation["schedule"], crops)
         ],

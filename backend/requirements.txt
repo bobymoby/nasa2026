@@ -7,3 +7,4 @@ scipy>=1.11
 shapely>=2.0
 rasterio>=1.4
 pycountry>=24.6
+pyproj

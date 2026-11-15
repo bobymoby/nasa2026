@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.routers.crops import Bounds, CamelModel, SelectedField
+from app.services import crop_calendar
 from app.services import strategies as svc
 from app.services import strategy_economics as econ
 from app.services.country import country_at
@@ -258,12 +259,12 @@ def _economics(strategy: dict, area_ha: float, market: Market) -> Economics:
     )
 
 
-def _default_baseline(pool: list[str], years: int, frost: svc.agronomy.Frost) -> list[str]:
+def _default_baseline(pool: list[str], years: int, calendar: svc.agronomy.Calendar) -> list[str]:
     """The regional baseline crops in the first order that fits this area's calendar."""
     crops = [c for c in svc.DEFAULT_BASELINE if c in pool]
     for order in permutations(crops):
         sequence = [order[i % len(order)] for i in range(years)]
-        if svc.schedule_fits(sequence, frost):
+        if svc.schedule_fits(sequence, calendar):
             return sequence
     raise HTTPException(422, "The regional baseline rotation does not fit this area's crop calendar.")
 
@@ -289,6 +290,11 @@ def _climate(site_context: dict[str, Any]) -> tuple[dict[int, float], svc.agrono
     return et0, svc.agronomy.Frost(spring, autumn)
 
 
+def _gridded_list(calendar: svc.agronomy.Calendar, pool: list[str]) -> str:
+    names = [svc.CROP_BY_ID[c].name for c in pool if calendar.is_gridded(c)]
+    return ", ".join(names) if names else "none of the offered crops"
+
+
 @router.post(
     "/strategies/crops",
     response_model=PlannableCrops,
@@ -310,6 +316,7 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
     market = _market(request)
     suitability = {**_suitability(request.site_context), **request.crop_suitability}
     et0, frost = _climate(request.site_context)
+    calendar = svc.agronomy.Calendar(frost, crop_calendar.dates_at(*request.centre()))
     pool = [c for c in _plannable(market) if c in suitability]
 
     selected = list(dict.fromkeys(request.crops or request.available_crops or []))
@@ -326,9 +333,9 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
         "preferred_crops": list(dict.fromkeys([*request.preferred_crops, *selected])),
         "excluded_crops": request.excluded_crops,
         "irrigation_available": request.irrigation_available,
-        "frost": frost,
+        "calendar": calendar,
         "crop_suitability": {c: suitability[c] for c in pool},
-        "crop_water_demand_mm": {c: svc.crop_et_demand_mm(c, et0, frost) for c in pool},
+        "crop_water_demand_mm": {c: svc.crop_et_demand_mm(c, et0, calendar) for c in pool},
         "crop_revenue_eur_ha": {c: econ.crop_revenue_eur_ha(c, market) for c in pool},
         "crop_risk": {
             c: svc.revenue_risk(market.crops[c].price_cv, market.crops[c].yield_cv) for c in pool
@@ -343,7 +350,7 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
     territory["baseline_rotation"] = (
         [request.baseline_rotation[i % len(request.baseline_rotation)] for i in range(years)]
         if request.baseline_rotation
-        else _default_baseline(pool, years, frost)
+        else _default_baseline(pool, years, calendar)
     )
 
     try:
@@ -382,9 +389,10 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
         baseline_rotation=territory["baseline_rotation"],
         baseline=svc.evaluate_baseline(territory),
         assumptions=[
-            "Crop calendars, families, rooting depth, nitrogen fixation and humus balance come from crop_agronomy.csv (FAO-56, FAO-33, VDLUFA).",
+            f"Sowing and harvest dates come from the {crop_calendar.SOURCE}, rainfed, where this 0.5° cell has an observed calendar for the crop ({_gridded_list(calendar, pool)}); other crops use the typical calendar in crop_agronomy.csv, shifted to this area's frost dates.",
+            "Crop families, rooting depth, nitrogen fixation, humus balance and FAO-56 stage proportions come from crop_agronomy.csv (FAO-56, FAO-33, VDLUFA).",
             "Suitability is FAO GAEZ v4 rainfed (1981–2010) for these fields.",
-            "Water demand is FAO-56 crop coefficients times this area's ERA5 1995–2024 reference-ET normals; frost dates shift sowing.",
+            "Water demand is FAO-56 crop coefficients over these sowing-to-harvest seasons times this area's ERA5 1995–2024 reference-ET normals.",
             f"Revenue is the national 5-year mean yield times the 5-year mean price ({market.country}, Eurostat or FAOSTAT, in {market.price_year} euros).",
             "Income risk is the year-to-year variation of national yields and prices over the last 10 years.",
             "No cost data exists, so costs and profit are not shown; revenue is gross output per hectare.",

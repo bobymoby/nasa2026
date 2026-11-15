@@ -1,6 +1,10 @@
 """Fixed agronomy table per crop: Bulgarian calendar, FAO-56 water parameters,
 nitrogen, humus balance, drought tolerance and forage use.
 
+A `Calendar` replaces the table's sowing and harvest dates: gridded planting and
+maturity days (crop_calendar) where they exist, stage lengths scaled to fit;
+otherwise the table's calendar shifted to the local frost dates.
+
 Sources
     FAO-56: Allen et al. (1998), Tables 11/12 (stage lengths, Kc), Table 22 (p, rooting depth).
     FAO-33: Doorenbos & Kassam (1979), Ky.
@@ -30,6 +34,16 @@ FAMILY = re.compile(r"^[A-Z][a-z]+aceae$")
 class Frost(NamedTuple):
     last_spring: MD
     first_autumn: MD
+
+
+class Calendar(NamedTuple):
+    frost: Frost | None = None
+    # crop id -> (planting, maturity) day of year
+    gridded: dict[str, tuple[int, int]] | None = None
+
+    def is_gridded(self, crop_id: str) -> bool:
+        dates = (self.gridded or {}).get(crop_id)
+        return dates is not None and (dates[1] - dates[0]) % 365 > 0
 
 
 def _ref(md: MD, year: int = REFERENCE_YEAR + 1) -> date:
@@ -177,13 +191,29 @@ def sowing_shift_days(crop: AgronomyCrop, frost: Frost | None) -> int:
     return 0
 
 
-def water_crop(crop: AgronomyCrop | str, frost: Frost | None = None) -> drought.Crop:
+def _scaled(lengths: tuple[int, ...], total: int) -> tuple[int, ...]:
+    """FAO-56 stage lengths stretched proportionally to a season of `total` days."""
+    head = [max(1, round(length * total / sum(lengths))) for length in lengths[:-1]]
+    return (*head, max(1, total - sum(head)))
+
+
+def season(crop: AgronomyCrop, calendar: Calendar | None) -> tuple[date, tuple[int, ...]]:
+    """Sowing day (in the reference years) and stage lengths under this calendar."""
+    if calendar is not None and calendar.is_gridded(crop.crop_id):
+        planting, maturity = calendar.gridded[crop.crop_id]
+        sow = date(REFERENCE_YEAR, 1, 1) + timedelta(days=planting - 1)
+        return sow, _scaled(crop.stage_lengths, (maturity - planting) % 365)
+    frost = calendar.frost if calendar is not None else None
+    return crop.sow_day + timedelta(days=sowing_shift_days(crop, frost)), crop.stage_lengths
+
+
+def water_crop(crop: AgronomyCrop | str, calendar: Calendar | None = None) -> drought.Crop:
     if isinstance(crop, str):
         crop = crops()[crop]
-    sow = crop.sow_day + timedelta(days=sowing_shift_days(crop, frost))
+    sow, lengths = season(crop, calendar)
 
     bounds = [sow]
-    for length in crop.stage_lengths:
+    for length in lengths:
         bounds.append(bounds[-1] + timedelta(days=length))
     kcs = (crop.kc_ini, crop.kc_ini, crop.kc_mid, crop.kc_mid, crop.kc_end)
     stages = [
