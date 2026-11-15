@@ -1,0 +1,223 @@
+{
+    "info": {
+        "name": "Rotation risks",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "variable": [
+        {
+            "key": "baseUrl",
+            "value": "http://localhost:8000"
+        }
+    ],
+    "item": [
+        {
+            "name": "Single winter crop: no risk",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "url": "{{baseUrl}}/api/crops/rotation-risks",
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"crops\": [\"wheat\"]\n}"
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "type": "text/javascript",
+                        "exec": [
+                            "pm.test('200 OK', () => pm.response.to.have.status(200))",
+                            "pm.test('no issues', () => pm.expect(pm.response.json().issues).to.eql([]))"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Same crop twice: disease buildup",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "url": "{{baseUrl}}/api/crops/rotation-risks",
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"crops\": [\"maize\", \"maize\"]\n}"
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "type": "text/javascript",
+                        "exec": [
+                            "pm.test('200 OK', () => pm.response.to.have.status(200))",
+                            "pm.test('only issue names', () => pm.response.json().issues.forEach(i => pm.expect(i).to.be.a('string')))",
+                            "pm.test('disease_buildup is possible', () => pm.expect(pm.response.json().issues).to.include('disease_buildup'))",
+                            "pm.test('worst issue first', () => pm.expect(pm.response.json().issues[0]).to.eql('disease_buildup'))"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Sunflower -> wheat: drought and heat",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "url": "{{baseUrl}}/api/crops/rotation-risks",
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"crops\": [\"sunflower\", \"wheat\"]\n}"
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "type": "text/javascript",
+                        "exec": [
+                            "pm.test('200 OK', () => pm.response.to.have.status(200))",
+                            "pm.test('only issue names', () => pm.response.json().issues.forEach(i => pm.expect(i).to.be.a('string')))",
+                            "pm.test('drought is possible', () => pm.expect(pm.response.json().issues).to.include('drought'))",
+                            "pm.test('heat is possible', () => pm.expect(pm.response.json().issues).to.include('heat'))",
+                            "pm.test('no duplicates', () => { const i = pm.response.json().issues; pm.expect(new Set(i).size).to.eql(i.length) })"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Sugar beet -> wheat: waterlogging",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "url": "{{baseUrl}}/api/crops/rotation-risks",
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"crops\": [\"sugar_beet\", \"wheat\"]\n}"
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "type": "text/javascript",
+                        "exec": [
+                            "pm.test('200 OK', () => pm.response.to.have.status(200))",
+                            "pm.test('only issue names', () => pm.response.json().issues.forEach(i => pm.expect(i).to.be.a('string')))",
+                            "pm.test('waterlogging is possible', () => pm.expect(pm.response.json().issues).to.include('waterlogging'))"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Aliases and casing are accepted",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "url": "{{baseUrl}}/api/crops/rotation-risks",
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"crops\": [\"dry_pea\", \"Sugarbeet \"]\n}"
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "type": "text/javascript",
+                        "exec": [
+                            "pm.test('200 OK', () => pm.response.to.have.status(200))",
+                            "pm.test('only issue names', () => pm.response.json().issues.forEach(i => pm.expect(i).to.be.a('string')))",
+                            "pm.test('erosion is possible', () => pm.expect(pm.response.json().issues).to.include('erosion'))"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Unknown crop: 422",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "url": "{{baseUrl}}/api/crops/rotation-risks",
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"crops\": [\"wheat\", \"banana\"]\n}"
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "type": "text/javascript",
+                        "exec": [
+                            "pm.test('422', () => pm.response.to.have.status(422))",
+                            "pm.test('names the unknown crop', () => pm.expect(pm.response.json().detail).to.include('banana'))"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Empty list: 422",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "url": "{{baseUrl}}/api/crops/rotation-risks",
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"crops\": []\n}"
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "type": "text/javascript",
+                        "exec": [
+                            "pm.test('422', () => pm.response.to.have.status(422))"
+                        ]
+                    }
+                }
+            ]
+        }
+    ]
+}

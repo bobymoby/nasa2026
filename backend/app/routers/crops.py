@@ -269,32 +269,22 @@ class RotationRequest(CamelModel):
     )
 
 
-class RotationCause(CamelModel):
-    severity: Literal["medium", "high"]
-    crops: list[str] = Field(description="The crop or crop step causing it")
-    reason: str
-    mitigation: str
-
-
-class RotationIssue(CamelModel):
-    issue: Literal["drought", "heat", "waterlogging", "erosion", "disease_buildup"]
-    severity: Literal["medium", "high"] = Field(description="Worst cause")
-    causes: list[RotationCause]
-
-
 class RotationResponse(CamelModel):
-    issues: list[RotationIssue] = Field(description="Empty = no medium or high risk")
+    issues: list[Literal["drought", "heat", "waterlogging", "erosion", "disease_buildup"]] = Field(
+        description="Possible issues, worst first. Empty = none",
+        examples=[["drought", "erosion"]],
+    )
 
 
 @router.post(
     "/crops/rotation-risks",
     response_model=RotationResponse,
     response_model_by_alias=True,
-    summary="Environmental issues a crop sequence makes worse (medium/high only)",
+    summary="Environmental issues a crop sequence makes possible",
     description=(
-        "Crops in planting order; returns drought, heat, waterlogging, erosion and "
-        "disease-buildup risks the sequence makes worse. Only medium and high risks "
-        "are listed; an empty list means none. Known crops: "
+        "Crops in planting order; returns the names of the issues (drought, heat, "
+        "waterlogging, erosion, disease_buildup) the sequence makes possible. An "
+        "empty list means none. Known crops: "
         + ", ".join(sorted(ROTATION_CROPS))
         + "; also accepted: "
         + ", ".join(sorted(ROTATION_ALIASES))
@@ -306,4 +296,4 @@ def crops_rotation_risks(request: RotationRequest) -> RotationResponse:
         issues = rotation_risks(request.crops)
     except ValueError as e:
         raise HTTPException(422, str(e))
-    return RotationResponse(issues=issues)
+    return RotationResponse(issues=[i["issue"] for i in issues])
