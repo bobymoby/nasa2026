@@ -50,15 +50,7 @@ export type Planting = {
 export type Rating = { score: number; summary: string }
 export type Assessment = { level: Level; summary: string }
 
-export type Money = {
-    revenue: number
-    seedCost: number
-    operatingCost: number
-    totalCost: number
-    profit: number
-}
-
-// estimates in EUR; perHa is one pass through the rotation
+// gross revenue in EUR; revenuePerHa is one pass through the rotation
 export type Economics = {
     currency: "EUR"
     // ISO alpha-2 country whose market figures are used
@@ -66,22 +58,20 @@ export type Economics = {
     // prices are real euros of this year
     priceYear: number
     areaHa: number
-    perHa: Money
-    profitPerHaYear: number
-    // perHa scaled to the selected area
-    total: Money
+    revenuePerHa: number
+    revenuePerHaYear: number
+    // revenuePerHa over the whole rotation, scaled to the selected area
+    totalRevenue: number
     plantings: {
         cropName: string
         role: PlantingRole
         yieldTHa: number
         priceEurT: number
         revenue: number
-        cost: number
-        profit: number
-        // "price eurostat 2020–2024, yield eurostat 2021–2025", "no market data", "no cost estimate" or "no harvest"
+        // "price eurostat 2020–2024, yield eurostat 2021–2025"
         source: string
     }[]
-    byYear: { year: number; revenue: number; cost: number; profit: number }[]
+    byYear: { year: number; revenue: number }[]
 }
 
 export type Strategy = {

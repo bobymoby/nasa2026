@@ -2,8 +2,8 @@
 
 Every plannable crop is a harvested crop of crop_agronomy.csv. Per request
 the router supplies, for every crop it offers, the field's GAEZ suitability,
-ERA5-based water demand, market profit and income risk through the territory
-dict (`crop_suitability`, `crop_water_demand_mm`, `crop_profit_eur_ha`,
+ERA5-based water demand, market revenue and income risk through the territory
+dict (`crop_suitability`, `crop_water_demand_mm`, `crop_revenue_eur_ha`,
 `crop_risk`).
 """
 
@@ -79,35 +79,35 @@ def revenue_risk(price_cv: float, yield_cv: float) -> float:
     return round(min(100.0, 200 * math.sqrt(price_cv**2 + yield_cv**2)), 1)
 
 
-COMPONENTS = ("profit", "soil_benefit", "risk_control", "water_efficiency", "feasibility")
+COMPONENTS = ("revenue", "soil_benefit", "risk_control", "water_efficiency", "feasibility")
 STRATEGY_PROFILES: dict[str, dict[str, float]] = {
-    "profit_first": {
-        "profit": 0.45, "soil_benefit": 0.10, "risk_control": 0.10,
+    "revenue_first": {
+        "revenue": 0.45, "soil_benefit": 0.10, "risk_control": 0.10,
         "water_efficiency": 0.10, "feasibility": 0.25,
     },
     "soil_builder": {
-        "profit": 0.15, "soil_benefit": 0.40, "risk_control": 0.15,
+        "revenue": 0.15, "soil_benefit": 0.40, "risk_control": 0.15,
         "water_efficiency": 0.10, "feasibility": 0.20,
     },
     "risk_balanced": {
-        "profit": 0.15, "soil_benefit": 0.15, "risk_control": 0.40,
+        "revenue": 0.15, "soil_benefit": 0.15, "risk_control": 0.40,
         "water_efficiency": 0.15, "feasibility": 0.15,
     },
     "water_efficient": {
-        "profit": 0.15, "soil_benefit": 0.15, "risk_control": 0.15,
+        "revenue": 0.15, "soil_benefit": 0.15, "risk_control": 0.15,
         "water_efficiency": 0.40, "feasibility": 0.15,
     },
     "balanced": {
-        "profit": 0.20, "soil_benefit": 0.20, "risk_control": 0.20,
+        "revenue": 0.20, "soil_benefit": 0.20, "risk_control": 0.20,
         "water_efficiency": 0.20, "feasibility": 0.20,
     },
 }
 STRATEGY_NAMES = {
-    "profit_first": ("Profit-focused", "Prioritizes estimated rotation gross margin."),
+    "revenue_first": ("Revenue-focused", "Prioritizes national yield times price per hectare."),
     "soil_builder": ("Soil-building", "Prioritizes legume, cover, and soil-benefit traits."),
     "risk_balanced": ("Risk-balanced", "Favors crops whose national yields and prices vary least."),
-    "water_efficient": ("Water-efficient", "Favors lower water demand and profit per water unit."),
-    "balanced": ("Balanced", "Balances profit, soil benefit, risk, water efficiency, and feasibility."),
+    "water_efficient": ("Water-efficient", "Favors lower water demand and revenue per water unit."),
+    "balanced": ("Balanced", "Balances revenue, soil benefit, risk, water efficiency, and feasibility."),
 }
 DEFAULT_BASELINE = ("wheat", "sunflower", "barley", "chickpea", "rapeseed")
 MIN_SUITABILITY = 25.0
@@ -333,8 +333,8 @@ def _metrics(rotation: dict[str, Any], territory: dict[str, Any]) -> dict[str, A
         len(preferred.intersection(crop.id for crop in crops)) / len(preferred)
         if preferred else 1.0
     )
-    profits = territory.get("crop_profit_eur_ha", {})
-    profit = sum(profits[crop.id] for crop in crops)
+    revenues = territory.get("crop_revenue_eur_ha", {})
+    revenue = sum(revenues[crop.id] for crop in crops)
     soil_benefit = sum(_humus_balance_score(crop) for crop in crops) / len(crops)
     risks = territory.get("crop_risk", {})
     risk = sum(risks[crop.id] for crop in crops) / len(crops)
@@ -346,7 +346,7 @@ def _metrics(rotation: dict[str, Any], territory: dict[str, Any]) -> dict[str, A
         0.8 * (sum(scores) / len(scores)) + 20 * preferred_fraction - rotation_penalty,
     )
     return {
-        "profit_eur_ha": round(profit, 2),
+        "revenue_eur_ha": round(revenue, 2),
         "soil_benefit_score": round(soil_benefit, 2),
         "risk_score": round(risk, 2),
         "water_demand_mm": water,
@@ -371,7 +371,7 @@ def _baseline_metrics(baseline: list[str], territory: dict[str, Any]) -> dict[st
     rotation = {"crop_ids": [crop.id for crop in crops], "schedule": schedule}
     metrics = _metrics(rotation, territory)
     metrics["water_efficiency_score"] = round(
-        100 * metrics["profit_eur_ha"] / max(metrics["water_demand_mm"], 1), 2
+        100 * metrics["revenue_eur_ha"] / max(metrics["water_demand_mm"], 1), 2
     )
     return metrics
 
@@ -381,7 +381,7 @@ def evaluate_baseline(territory: dict[str, Any]) -> dict[str, Any]:
     metrics = _baseline_metrics(crop_ids, territory)
     return {
         "crop_ids": crop_ids,
-        "profit_eur_ha": metrics["profit_eur_ha"],
+        "revenue_eur_ha": metrics["revenue_eur_ha"],
         "soil_benefit_score": metrics["soil_benefit_score"],
         "risk_score": metrics["risk_score"],
         "water_demand_mm": metrics["water_demand_mm"],
@@ -482,12 +482,12 @@ def _to_legacy_shape(
             "drought_tolerant": _role_assessment(crops, "drought_tolerant"),
         },
         "market_considerations": [
-            "Revenue uses national average yields and market prices; seed and other costs are typical estimates.",
-            "Check local buyers, your own yields and input costs before use.",
+            "Revenue uses national average yields and market prices; costs are not included.",
+            "Check local buyers and your own yields before use.",
         ],
         "evaluation": metrics,
         "comparison": {
-            "profit_difference_eur_ha": round(metrics["profit_eur_ha"] - baseline_metrics["profit_eur_ha"], 2),
+            "revenue_difference_eur_ha": round(metrics["revenue_eur_ha"] - baseline_metrics["revenue_eur_ha"], 2),
             "risk_difference": round(metrics["risk_score"] - baseline_metrics["risk_score"], 2),
             "soil_benefit_difference": round(metrics["soil_benefit_score"] - baseline_metrics["soil_benefit_score"], 2),
             "water_demand_difference": metrics["water_demand_mm"] - baseline_metrics["water_demand_mm"],
@@ -519,7 +519,7 @@ def _role_assessment(crops: list[CropProfile], trait: str) -> dict[str, str]:
 
 def _explanations(metrics: dict[str, Any], baseline: dict[str, Any], crops: list[CropProfile]) -> list[str]:
     differences = (
-        ("profit", metrics["profit_eur_ha"] - baseline["profit_eur_ha"], "more", "less"),
+        ("revenue", metrics["revenue_eur_ha"] - baseline["revenue_eur_ha"], "more", "less"),
         ("soil benefit", metrics["soil_benefit_score"] - baseline["soil_benefit_score"], "higher", "lower"),
         ("risk", metrics["risk_score"] - baseline["risk_score"], "higher", "lower"),
         ("water demand", metrics["water_demand_mm"] - baseline["water_demand_mm"], "more", "less"),
@@ -550,12 +550,12 @@ def rank_rotation_strategies(
     baseline_ids = territory.get("baseline_rotation") or list(DEFAULT_BASELINE)
     baseline_metrics = _baseline_metrics(baseline_ids, territory)
     metric_list = [_metrics(rotation, territory) for rotation in rotations]
-    profits = [metrics["profit_eur_ha"] for metrics in metric_list]
+    revenues = [metrics["revenue_eur_ha"] for metrics in metric_list]
     water_efficiencies = [
-        metrics["profit_eur_ha"] / max(metrics["water_demand_mm"], 1)
+        metrics["revenue_eur_ha"] / max(metrics["water_demand_mm"], 1)
         for metrics in metric_list
     ]
-    profit_range = (min(profits), max(profits))
+    revenue_range = (min(revenues), max(revenues))
     water_range = (min(water_efficiencies), max(water_efficiencies))
     for metrics, efficiency in zip(metric_list, water_efficiencies):
         metrics["water_efficiency_score"] = round(
@@ -588,7 +588,7 @@ def rank_rotation_strategies(
         scores = []
         for rotation, metrics in zip(rotations, metric_list):
             components = {
-                "profit": _linear_score(metrics["profit_eur_ha"], *profit_range),
+                "revenue": _linear_score(metrics["revenue_eur_ha"], *revenue_range),
                 "soil_benefit": metrics["soil_benefit_score"],
                 "risk_control": 100 - metrics["risk_score"],
                 "water_efficiency": metrics["water_efficiency_score"],
@@ -631,7 +631,7 @@ def rank_rotation_strategies(
         matched = sorted(preferred.intersection(rotations[selected]["crop_ids"]))
         name, summary = STRATEGY_NAMES[strategy_type]
         selected_components = {
-            "profit": _linear_score(metrics["profit_eur_ha"], *profit_range),
+            "revenue": _linear_score(metrics["revenue_eur_ha"], *revenue_range),
             "soil_benefit": metrics["soil_benefit_score"],
             "risk_control": 100 - metrics["risk_score"],
             "water_efficiency": metrics["water_efficiency_score"],

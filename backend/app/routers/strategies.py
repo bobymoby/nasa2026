@@ -16,14 +16,14 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["strategies"])
 
 StrategyType = Literal[
-    "profit_first", "soil_builder", "risk_balanced", "water_efficient", "balanced"
+    "revenue_first", "soil_builder", "risk_balanced", "water_efficient", "balanced"
 ]
 
 
 class StrategyWeights(CamelModel):
     model_config = ConfigDict(extra="forbid")
 
-    profit: float | None = Field(default=None, ge=0)
+    revenue: float | None = Field(default=None, ge=0)
     soil_benefit: float | None = Field(default=None, ge=0)
     risk_control: float | None = Field(default=None, ge=0)
     water_efficiency: float | None = Field(default=None, ge=0)
@@ -141,7 +141,7 @@ class CropRoles(CamelModel):
 
 
 class Evaluation(CamelModel):
-    profit_eur_ha: float
+    revenue_eur_ha: float
     soil_benefit_score: float
     risk_score: float
     water_demand_mm: int
@@ -156,36 +156,24 @@ class Evaluation(CamelModel):
 
 
 class StrategyComparison(BaseModel):
-    profit_difference_eur_ha: float
+    revenue_difference_eur_ha: float
     risk_difference: float
     soil_benefit_difference: float
     water_demand_difference: int
 
 
-class Money(CamelModel):
-    revenue: float
-    seed_cost: float
-    operating_cost: float
-    total_cost: float
-    profit: float
-
-
-class PlantingMoney(CamelModel):
+class PlantingRevenue(CamelModel):
     crop_name: str
     role: Literal["cash", "cover", "forage"]
     yield_t_ha: float
     price_eur_t: float
     revenue: float
-    cost: float
-    profit: float
     source: str
 
 
-class YearMoney(CamelModel):
+class YearRevenue(CamelModel):
     year: int
     revenue: float
-    cost: float
-    profit: float
 
 
 class Economics(CamelModel):
@@ -193,11 +181,11 @@ class Economics(CamelModel):
     country: str
     price_year: int
     area_ha: float
-    per_ha: Money
-    profit_per_ha_year: float
-    total: Money
-    plantings: list[PlantingMoney]
-    by_year: list[YearMoney]
+    revenue_per_ha: float
+    revenue_per_ha_year: float
+    total_revenue: float
+    plantings: list[PlantingRevenue]
+    by_year: list[YearRevenue]
 
 
 class Strategy(CamelModel):
@@ -230,16 +218,6 @@ class StrategiesResponse(CamelModel):
     strategies: list[Strategy]
 
 
-def _money(e: econ.StrategyEconomics, scale: float = 1.0) -> Money:
-    return Money(
-        revenue=round(e.revenue * scale),
-        seed_cost=round(e.seed_cost * scale),
-        operating_cost=round(e.operating_cost * scale),
-        total_cost=round(e.total_cost * scale),
-        profit=round(e.profit * scale),
-    )
-
-
 class PlannableCrops(CamelModel):
     country: str
     crops: list[str]
@@ -257,31 +235,26 @@ def _plannable(market: Market) -> list[str]:
 
 
 def _economics(strategy: dict, area_ha: float, market: Market) -> Economics:
-    e = econ.strategy_economics(strategy["plantings"], strategy["duration_years"], market)
+    e = econ.strategy_revenue(strategy["plantings"], strategy["duration_years"], market)
     return Economics(
         country=e.country,
         price_year=e.price_year,
         area_ha=round(area_ha, 2),
-        per_ha=_money(e),
-        profit_per_ha_year=round(e.profit / e.years),
-        total=_money(e, area_ha),
+        revenue_per_ha=round(e.revenue),
+        revenue_per_ha_year=round(e.revenue / e.years),
+        total_revenue=round(e.revenue * area_ha),
         plantings=[
-            PlantingMoney(
+            PlantingRevenue(
                 crop_name=p.crop_name,
                 role=p.role,
                 yield_t_ha=p.yield_t_ha,
                 price_eur_t=p.price_eur_t,
                 revenue=round(p.revenue),
-                cost=round(p.cost),
-                profit=round(p.revenue - p.cost),
                 source=p.source,
             )
             for p in e.plantings
         ],
-        by_year=[
-            YearMoney(year=i + 1, revenue=round(r), cost=round(c), profit=round(r - c))
-            for i, (r, c) in enumerate(e.by_year())
-        ],
+        by_year=[YearRevenue(year=i + 1, revenue=round(r)) for i, r in enumerate(e.by_year())],
     )
 
 
@@ -345,7 +318,7 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
         raise HTTPException(
             422,
             f"No complete planning data for {', '.join(missing)} here "
-            f"(needs agronomy, GAEZ suitability, {market.country} yield and price history, and costs).",
+            f"(needs agronomy, GAEZ suitability, {market.country} yield and price history).",
         )
 
     territory = {
@@ -356,7 +329,7 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
         "frost": frost,
         "crop_suitability": {c: suitability[c] for c in pool},
         "crop_water_demand_mm": {c: svc.crop_et_demand_mm(c, et0, frost) for c in pool},
-        "crop_profit_eur_ha": {c: econ.crop_profit_eur_ha(c, market) for c in pool},
+        "crop_revenue_eur_ha": {c: econ.crop_revenue_eur_ha(c, market) for c in pool},
         "crop_risk": {
             c: svc.revenue_risk(market.crops[c].price_cv, market.crops[c].yield_cv) for c in pool
         },
@@ -380,7 +353,7 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
         ranked = svc.rank_rotation_strategies(
             selected_rotations,
             territory,
-            strategy_types=["profit_first", "soil_builder", "risk_balanced", "water_efficient"],
+            strategy_types=["revenue_first", "soil_builder", "risk_balanced", "water_efficient"],
         )
         balanced_rotations = svc.generate_valid_rotations(
             territory,
@@ -414,7 +387,7 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
             "Water demand is FAO-56 crop coefficients times this area's ERA5 1995–2024 reference-ET normals; frost dates shift sowing.",
             f"Revenue is the national 5-year mean yield times the 5-year mean price ({market.country}, Eurostat or FAOSTAT, in {market.price_year} euros).",
             "Income risk is the year-to-year variation of national yields and prices over the last 10 years.",
-            "Seed and operating costs are typical estimates for Bulgaria; rent, subsidies and labour are not included.",
+            "No cost data exists, so costs and profit are not shown; revenue is gross output per hectare.",
             "Erosion risk is not assessed.",
         ],
         strategies=[{**s, "economics": _economics(s, area_ha, market)} for s in ranked],
