@@ -23,7 +23,7 @@ export default function AppRouter() {
         if (next.length > 0) setBounds(null)
     }, [])
 
-    // memoised so the crops page doesn't refetch on unrelated re-renders
+    // memoised so the map and crops page don't refetch on unrelated re-renders
     const selection = useMemo<AreaSelection | null>(() => {
         if (selectedFields.length > 0) {
             return {
@@ -54,6 +54,7 @@ export default function AppRouter() {
                         onBoundsChange={changeBounds}
                         selectedFields={selectedFields}
                         onSelectedFieldsChange={changeSelectedFields}
+                        selection={selection}
                     />
                 }
             />

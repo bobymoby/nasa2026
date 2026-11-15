@@ -16,8 +16,9 @@ import NdviDebug from "../NdviDebug/NdviDebug"
 import SentinelPanel from "../SentinelPanel/SentinelPanel"
 import { INITIAL_VIEW_STATE, MAPBOX_ACCESS_TOKEN, STYLES } from "./mapConfig"
 import SoilLegend from "../SoilLegend/SoilLegend"
+import SoilProfile from "../SoilProfile/SoilProfile"
 import { fetchSoil, LngLatBox, SOIL_TILES_URL } from "../../api/fetchSoil"
-import { Bounds, Point } from "../../data/point"
+import { AreaSelection, Bounds, Point } from "../../data/point"
 import {
     Field,
     FIELD_TILES_LAYER,
@@ -216,12 +217,14 @@ function Map({
     selectedFields,
     onSelectedFieldsChange,
     onConfirm,
+    selection,
 }: {
     bounds: Bounds | null
     onBoundsChange: (bounds: Bounds | null) => void
     selectedFields: Field[]
     onSelectedFieldsChange: (fields: Field[]) => void
     onConfirm: () => void
+    selection: AreaSelection | null
 }) {
     const mapRef = useRef<mapboxgl.Map>(null)
     const mapContainerRef = useRef<HTMLDivElement>(null)
@@ -887,6 +890,7 @@ function Map({
             {selectedFields.length > 0 && (
                 <SentinelPanel fields={selectedFields} />
             )}
+            {selection && <SoilProfile selection={selection} />}
             {showNdvi && selectedFields.length > 0 && (
                 <NdviDebug
                     fields={selectedFields}

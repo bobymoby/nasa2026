@@ -6,10 +6,10 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
-from shapely.geometry import Polygon
 
 from app.geo import Rect, RectQuery
 from app.routers.sentinel import Client, DateFrom, DateTo
+from app.services.field_ndvi import plot_polygon
 from app.services.sentinel_hub import SentinelHubError
 from app.services.soil import get_soil_characteristics
 from app.services.soilgrids import (
@@ -130,10 +130,10 @@ def soil_selection(request: SoilSelectionRequest) -> dict:
 
     polygons = []
     for field in request.fields:
-        polygon = Polygon([(point.lng, point.lat) for point in field.polygon])
-        if not polygon.is_valid or polygon.area == 0:
-            raise HTTPException(422, f"Field {field.id} has an invalid polygon")
-        polygons.append(polygon)
+        try:
+            polygons.append(plot_polygon([(point.lat, point.lng) for point in field.polygon]))
+        except ValueError as e:
+            raise HTTPException(422, f"Field {field.id} has an invalid polygon: {e}") from e
     return _soilgrids_response(
         lambda: get_soil_selection(polygons=polygons)
     )

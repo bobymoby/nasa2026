@@ -21,6 +21,12 @@ $controls-height: 60px; // clears the .map-controls row
     font-size: 13px;
     animation: panel-in 220ms $ease;
 
+    .map-root:has(.soil-profile) & {
+        max-height: calc(
+            100% - #{$controls-height + $soil-profile-bottom + $soil-profile-height + $gap}
+        );
+    }
+
     // NdviDebug also styles .ndvi-legend as a flex row; this one is a bar
     .ndvi-legend {
         display: block;
