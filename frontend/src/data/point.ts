@@ -10,6 +10,15 @@ export type AreaSelection =
     | { kind: "bounds"; bounds: Bounds }
     | { kind: "fields"; fields: SelectedField[]; areaHa: number }
 
+// identifies the area in caches; fields by id, a rectangle by its corners
+export function selectionKey(selection: AreaSelection): string {
+    if (selection.kind === "fields") {
+        return `fields:${selection.fields.map((f) => f.id).join(",")}`
+    }
+    const { topLeft, bottomRight } = selection.bounds
+    return `bounds:${topLeft.lat},${topLeft.lng},${bottomRight.lat},${bottomRight.lng}`
+}
+
 export function describeSelection(selection: AreaSelection): string {
     if (selection.kind === "fields") {
         const count = selection.fields.length

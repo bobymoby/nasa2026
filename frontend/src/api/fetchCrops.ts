@@ -1,7 +1,8 @@
-import { AreaSelection, Bounds, Point } from "../data/point"
+import { AreaSelection, Bounds, Point, selectionKey } from "../data/point"
 import { API_URL } from "./apiUrl"
 import { Field } from "./fetchField"
 import { toSelectedField } from "./fetchFieldNdvi"
+import { memo, peek } from "./memo"
 
 // GAEZ suitability classes, best first
 export type SuitabilityClass =
@@ -213,18 +214,30 @@ export function prefetchSuitability(fields: Field[]): void {
     }).catch(() => {})
 }
 
-export async function fetchCrops(
+const cropsKey = (selection: AreaSelection) =>
+    `crops:${selectionKey(selection)}`
+
+export function peekCrops(selection: AreaSelection): CropsResult | undefined {
+    return peek(cropsKey(selection))
+}
+
+export function fetchCrops(
     selection: AreaSelection,
     signal?: AbortSignal,
 ): Promise<CropsResult> {
-    const res = await fetch(`${API_URL}/api/fields/suitability`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody(selection)),
+    return memo(
+        cropsKey(selection),
+        async () => {
+            const res = await fetch(`${API_URL}/api/fields/suitability`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(requestBody(selection)),
+            })
+            if (!res.ok) throw new Error(`Failed to load crops (${res.status})`)
+            return combine(await res.json())
+        },
         signal,
-    })
-    if (!res.ok) throw new Error(`Failed to load crops (${res.status})`)
-    return combine(await res.json())
+    )
 }
 
 export type SoilImpact = {
@@ -247,11 +260,22 @@ export type SoilScoredCrop = {
     soil: SoilImpact
 }
 
-export async function fetchSoilScores(
+export function peekSoilScores(): SoilScoredCrop[] | undefined {
+    return peek("soil-scores")
+}
+
+export function fetchSoilScores(
     signal?: AbortSignal,
 ): Promise<SoilScoredCrop[]> {
-    const res = await fetch(`${API_URL}/api/crops/soil-scores`, { signal })
-    if (!res.ok) throw new Error(`Failed to load soil scores (${res.status})`)
-    const data: { crops: SoilScoredCrop[] } = await res.json()
-    return data.crops
+    return memo(
+        "soil-scores",
+        async () => {
+            const res = await fetch(`${API_URL}/api/crops/soil-scores`)
+            if (!res.ok)
+                throw new Error(`Failed to load soil scores (${res.status})`)
+            const data: { crops: SoilScoredCrop[] } = await res.json()
+            return data.crops
+        },
+        signal,
+    )
 }

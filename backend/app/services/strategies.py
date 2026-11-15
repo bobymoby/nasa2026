@@ -533,23 +533,14 @@ def planned_strategy(
 ) -> dict[str, Any] | None:
     """The farmer's planned rotation in the same shape as a ranked strategy.
 
-    The given order is kept when its seasons fit; otherwise the first crop
-    order that can be scheduled is used. None if no order fits. When the plan
-    is itself the baseline, it is compared with itself.
+    Crops are planted in the given order, a crop may come more than once, and
+    long gaps between harvest and the next sowing are kept as fallow. When the
+    plan is itself the baseline, it is compared with itself.
     """
     if not crop_ids:
         return None
-    crops = [_crop_profile(crop_id, territory) for crop_id in crop_ids]
-    sequence, schedule = next(
-        (
-            (order, schedule)
-            for order in islice(permutations(crops), MAX_ROTATIONS)
-            if (schedule := _schedule(order)) is not None
-        ),
-        (None, None),
-    )
-    if sequence is None:
-        return None
+    sequence = tuple(_crop_profile(crop_id, territory) for crop_id in crop_ids)
+    schedule = _schedule(sequence, max_fallow=None)
     rotation = {
         "crop_ids": [crop.id for crop in sequence],
         "schedule": schedule,
@@ -571,10 +562,13 @@ def planned_strategy(
         sorted(preferred.intersection(rotation["crop_ids"])), [],
         metrics if is_baseline else _baseline_metrics(baseline_ids, territory), territory,
     )
-    if rotation["crop_ids"] != list(crop_ids):
-        strategy["explanations"].insert(
-            0, "The crops were reordered so their growing seasons fit one after another."
-        )
+    for before, after in zip(schedule, schedule[1:]):
+        fallow = after["sow_index"] - before["harvest_index"] - 1
+        if fallow > MAX_FALLOW_MONTHS:
+            strategy["explanations"].append(
+                f"The field lies fallow for {fallow} months between {before['crop'].name} "
+                f"and {after['crop'].name}."
+            )
     return strategy
 
 

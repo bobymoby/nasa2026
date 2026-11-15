@@ -98,8 +98,8 @@ class StrategiesRequest(AreaRequest):
         default_factory=list,
         max_length=8,
         description=(
-            "Planned crops in planting order; returned first as the planned rotation and "
-            "used as the baseline unless baselineRotation is given."
+            "Planned crops in planting order, repeats allowed; returned first as the planned "
+            "rotation and used as the baseline unless baselineRotation is given."
         ),
     )
     years: int = Field(default=3, ge=2, le=5)
@@ -360,7 +360,7 @@ MOCK_HCAT = {
 }
 
 
-def _to_mock_ids(crops: list[str]) -> list[str]:
+def _to_mock_ids(crops: list[str], unique: bool = True) -> list[str]:
     unknown = [c for c in crops if c not in svc.CROP_BY_ID and c not in CROP_ALIASES]
     try:
         codes = hcat3_codes(unknown) if unknown else {}
@@ -371,7 +371,7 @@ def _to_mock_ids(crops: list[str]) -> list[str]:
     for c in crops:
         mapped = CROP_ALIASES.get(c) or (MOCK_HCAT.get(codes[c] // 100) if c in codes else None)
         out.append(mapped or c)
-    return list(dict.fromkeys(out))
+    return list(dict.fromkeys(out)) if unique else out
 
 
 class PlannableCrops(CamelModel):
@@ -401,7 +401,7 @@ def plannable_crops(request: AreaRequest) -> PlannableCrops:
 )
 def strategies(request: StrategiesRequest) -> StrategiesResponse:
     request.crops = _to_mock_ids(request.crops)
-    request.planned_crops = _to_mock_ids(request.planned_crops)
+    request.planned_crops = _to_mock_ids(request.planned_crops, unique=False)
     if request.available_crops:
         request.available_crops = _to_mock_ids(request.available_crops)
     preferred = list(dict.fromkeys([*request.preferred_crops, *request.crops]))
@@ -510,11 +510,6 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
             "Soil-building, risk-balanced and balanced plans fill idle windows between harvests with cover crops.",
             "Rotations run one year longer than the number of selected crops (at most 5 years), "
             "leaving room for a goal-specific crop.",
-            *(
-                ["Your planned crops could not be scheduled as one rotation, so it is not shown."]
-                if request.planned_crops and not planned
-                else []
-            ),
             "Every strategy is compared with a baseline: "
             + (
                 "the rotation you supplied."

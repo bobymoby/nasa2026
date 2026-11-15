@@ -111,7 +111,6 @@ $page-gutter: 32px;
 
 $card-width: 280px;
 $grid-gap: 12px; // GRID_GAP in CropsPage.tsx
-$min-card-height: 250px; // MIN_CARD_HEIGHT in CropsPage.tsx
 
 // the card grid takes all the height left between toolbar and footer and
 // scrolls sideways; full-bleed so cards run to the window edges
@@ -227,75 +226,6 @@ $soil-bad-text: #b91c1c;
     display: flex;
     align-items: center;
     gap: 10px;
-}
-
-// planned rotation: one row in planting order; cards are dragged to reorder
-.crops-list-ordered {
-    height: auto;
-    grid-template-rows: minmax($min-card-height, auto);
-
-    li {
-        position: relative;
-        cursor: grab;
-        transition: opacity $transition;
-
-        &.dragging {
-            opacity: 0.4;
-        }
-
-        // where the dragged card will land
-        &.drop-before::before,
-        &.drop-after::after {
-            content: "";
-            position: absolute;
-            top: 0;
-            bottom: 0;
-            width: 3px;
-            border-radius: 2px;
-            background-color: $accent;
-        }
-
-        &.drop-before::before {
-            left: calc(#{$grid-gap} / -2 - 1.5px);
-        }
-
-        &.drop-after::after {
-            right: calc(#{$grid-gap} / -2 - 1.5px);
-        }
-    }
-}
-
-// planned rotation: the position number replaces the tick; the checkbox stays
-// for keyboard and screen readers
-.crop-order-input {
-    position: absolute;
-    opacity: 0;
-    pointer-events: none;
-}
-
-.crop-order {
-    flex: none;
-    display: grid;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    border: 1.5px solid $page-border;
-    border-radius: 50%;
-    background-color: $page-card;
-    color: #fff;
-    font-size: 11px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-
-    .crop-order-input:checked + & {
-        border-color: $accent;
-        background-color: $accent;
-    }
-
-    .crop-order-input:focus-visible + & {
-        outline: 2px solid $accent;
-        outline-offset: 2px;
-    }
 }
 
 .crop-class {
@@ -555,79 +485,6 @@ $soil-bad-text: #b91c1c;
     &:hover span {
         background-color: rgb(255 255 255 / 35%);
     }
-}
-
-// ---- planting order (planned rotation) -------------------------------------
-
-.crops-sequence {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
-
-.crops-step {
-    flex: none;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-
-    // arrow between consecutive crops
-    & + &::before {
-        content: "→";
-        color: $page-muted;
-        font-size: 13px;
-    }
-}
-
-.crops-step-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    padding: 3px 4px 3px 4px;
-    border-radius: $radius-pill;
-    background-color: $accent;
-    color: #fff;
-    font-size: 12px;
-    font-weight: 600;
-
-    button {
-        @include button-reset;
-        @include focus-ring(#fff);
-        display: grid;
-        place-items: center;
-        width: 18px;
-        height: 18px;
-        border-radius: 50%;
-        color: #fff;
-        font-size: 13px;
-        line-height: 1;
-
-        &:first-of-type {
-            margin-left: 4px;
-        }
-
-        &:hover:not(:disabled) {
-            background-color: rgb(255 255 255 / 25%);
-        }
-
-        &:disabled {
-            opacity: 0.35;
-            cursor: default;
-        }
-    }
-}
-
-.crops-step-number {
-    display: grid;
-    place-items: center;
-    width: 18px;
-    height: 18px;
-    margin-right: 6px;
-    border-radius: 50%;
-    background-color: #fff;
-    color: $accent-strong;
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
 }
 
 .crops-results {

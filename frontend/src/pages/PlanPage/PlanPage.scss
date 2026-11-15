@@ -1,0 +1,285 @@
+@use "../../styles/tokens" as *;
+@use "../../styles/mixins" as *;
+
+$page-gutter: 32px;
+
+.plan-page {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px $page-gutter 0;
+    background:
+        radial-gradient(
+            1200px 400px at 50% -10%,
+            rgb(16 185 129 / 12%),
+            transparent 70%
+        ),
+        $page-bg;
+    color: $page-text;
+    font-family: $font-sans;
+
+    h1 {
+        margin: 0;
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+    }
+
+    h2 {
+        margin: 0;
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        font-size: 15px;
+        font-weight: 600;
+    }
+
+    ul,
+    ol {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    @media (max-width: 600px) {
+        padding: 16px 16px 0;
+    }
+}
+
+.plan-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+}
+
+.plan-back {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 12px;
+    border-radius: $radius-pill;
+    border: 1px solid $page-border;
+    background-color: $page-card;
+    color: $page-text;
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+    box-shadow: $shadow-light;
+    transition:
+        border-color $transition,
+        transform $transition;
+
+    &:hover {
+        border-color: $accent;
+        transform: translateX(-2px);
+    }
+}
+
+.plan-area {
+    margin: 0;
+    color: $page-muted;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+}
+
+.plan-intro {
+    flex-basis: 100%;
+    margin: 0;
+    max-width: 70ch;
+    color: $page-muted;
+    font-size: 14px;
+}
+
+.plan-options,
+.plan-track {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    border-radius: $radius-lg;
+    border: 1px solid $page-border;
+    background-color: $page-card;
+    box-shadow: $shadow-light;
+    transition:
+        border-color $transition,
+        background-color $transition;
+}
+
+.plan-options.removing {
+    border-color: $danger;
+    border-style: dashed;
+    background-color: #fef2f2;
+}
+
+.plan-hint,
+.plan-length {
+    margin: 0;
+    color: $page-muted;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+.plan-option {
+    @include button(ghost);
+    border: 1px solid $page-border;
+    background-color: $page-bg;
+    color: $page-text;
+    cursor: grab;
+
+    span {
+        color: $accent-strong;
+        font-weight: 700;
+    }
+
+    &:hover:not(:disabled) {
+        border-color: $accent;
+        background-color: $accent-soft;
+    }
+
+    &:active:not(:disabled) {
+        cursor: grabbing;
+    }
+}
+
+.plan-track {
+    min-height: 140px;
+    border-width: 2px;
+    border-style: dashed;
+
+    &.receiving {
+        border-color: $accent;
+        background-color: rgb(16 185 129 / 5%);
+    }
+
+    ol {
+        gap: 10px 14px;
+        padding: 4px 0;
+    }
+}
+
+.plan-empty {
+    flex: 1;
+    display: grid;
+    place-items: center;
+    margin: 0;
+    color: $page-muted;
+    font-size: 14px;
+}
+
+.plan-step {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 6px 6px 8px;
+    border-radius: $radius-pill;
+    border: 1px solid $accent;
+    background-color: $accent-soft;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: grab;
+    transition: opacity $transition;
+
+    &.dragged {
+        opacity: 0.4;
+    }
+
+    // insertion marker in the gap before or after the chip
+    &.drop-before::before,
+    &.drop-after::after {
+        content: "";
+        position: absolute;
+        top: 2px;
+        bottom: 2px;
+        width: 3px;
+        border-radius: 2px;
+        background-color: $accent-strong;
+    }
+
+    &.drop-before::before {
+        left: -9px;
+    }
+
+    &.drop-after::after {
+        right: -9px;
+    }
+
+    button {
+        @include button-reset;
+        @include focus-ring;
+        width: 24px;
+        height: 24px;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        color: $page-muted;
+        font-size: 15px;
+        line-height: 1;
+
+        &:hover:not(:disabled) {
+            background-color: $page-card;
+            color: $page-text;
+        }
+
+        &:disabled {
+            opacity: 0.3;
+            cursor: default;
+        }
+    }
+}
+
+.plan-step-number {
+    width: 22px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background-color: $accent-strong;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.plan-step-name {
+    padding-right: 2px;
+}
+
+.plan-footer {
+    position: sticky;
+    bottom: 0;
+    margin: auto (-$page-gutter) 0;
+    padding: 10px $page-gutter;
+    border-top: 1px solid $page-border;
+    background-color: rgb(246 247 244 / 92%);
+    backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+
+    @media (max-width: 600px) {
+        margin-inline: -16px;
+        padding-inline: 16px;
+    }
+}
+
+.plan-clear {
+    @include button(ghost);
+    color: $page-muted;
+
+    &:hover:not(:disabled) {
+        color: $danger-strong;
+    }
+}
+
+.plan-next {
+    @include button(primary);
+    text-decoration: none;
+}

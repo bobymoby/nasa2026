@@ -2,10 +2,14 @@ import "./StrategyPage.scss"
 import { useEffect, useState } from "react"
 import { Link } from "react-router"
 
-import { fetchRotationRisks } from "../../api/fetchRotationRisks"
+import {
+    fetchRotationRisks,
+    peekRotationRisks,
+} from "../../api/fetchRotationRisks"
 import {
     Assessment,
     fetchStrategies,
+    peekStrategies,
     Rating,
     Strategy,
     StrategiesResult,
@@ -301,20 +305,26 @@ function ComparisonTable({
 }
 
 function StrategyPage({ selection, crops, plannedCrops }: Props) {
-    const [strategies, setStrategies] = useState<Strategy[] | null>(null)
+    const cached = peekStrategies(selection, crops, plannedCrops)
+    const [strategies, setStrategies] = useState<Strategy[] | null>(
+        cached?.strategies ?? null,
+    )
     const [strategySources, setStrategySources] = useState<Pick<
         StrategiesResult,
         "assumptions"
-    > | null>(null)
+    > | null>(cached ? { assumptions: cached.assumptions } : null)
     const [error, setError] = useState<string | null>(null)
     const [reloadKey, setReloadKey] = useState(0)
-    const [selectedId, setSelectedId] = useState<string | null>(null)
+    const [selectedId, setSelectedId] = useState<string | null>(
+        cached?.strategies[0]?.id ?? null,
+    )
     const [risks, setRisks] = useState<Record<string, RiskState>>({})
 
     useEffect(() => {
         const controller = new AbortController()
-        setStrategies(null)
-        setStrategySources(null)
+        const known = peekStrategies(selection, crops, plannedCrops)
+        setStrategies(known?.strategies ?? null)
+        setStrategySources(known ? { assumptions: known.assumptions } : null)
         setError(null)
 
         fetchStrategies(selection, crops, plannedCrops, controller.signal)
@@ -347,10 +357,15 @@ function StrategyPage({ selection, crops, plannedCrops }: Props) {
         }
         setRisks(
             Object.fromEntries(
-                strategies.map((s) => [
-                    s.id,
-                    { status: "loading" } as RiskState,
-                ]),
+                strategies.map((s) => {
+                    const known = peekRotationRisks(
+                        plantingSequence(s.plantings),
+                    )
+                    const state: RiskState = known
+                        ? { status: "ok", issues: known }
+                        : { status: "loading" }
+                    return [s.id, state]
+                }),
             ),
         )
         bySequence.forEach((ids, key) => {

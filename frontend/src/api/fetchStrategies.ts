@@ -1,5 +1,6 @@
-import { AreaSelection } from "../data/point"
+import { AreaSelection, selectionKey } from "../data/point"
 import { API_URL } from "./apiUrl"
+import { memo, peek } from "./memo"
 
 // "unknown" when the data behind an assessment is unavailable
 export type Level = "low" | "medium" | "high" | "unknown"
@@ -130,21 +131,37 @@ function areaBody(selection: AreaSelection) {
         : { fields: selection.fields }
 }
 
-export async function fetchPlannableCrops(
+const plannableKey = (selection: AreaSelection) =>
+    `plannable:${selectionKey(selection)}`
+
+export function peekPlannableCrops(
+    selection: AreaSelection,
+): string[] | undefined {
+    return peek(plannableKey(selection))
+}
+
+export function fetchPlannableCrops(
     selection: AreaSelection,
     signal?: AbortSignal,
 ): Promise<string[]> {
-    const res = await fetch(`${API_URL}/api/strategies/crops`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(areaBody(selection)),
+    return memo(
+        plannableKey(selection),
+        async () => {
+            const res = await fetch(`${API_URL}/api/strategies/crops`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(areaBody(selection)),
+            })
+            if (!res.ok) {
+                throw new Error(
+                    `Failed to load plannable crops (${res.status})`,
+                )
+            }
+            const data: { crops: string[] } = await res.json()
+            return data.crops
+        },
         signal,
-    })
-    if (!res.ok) {
-        throw new Error(`Failed to load plannable crops (${res.status})`)
-    }
-    const data: { crops: string[] } = await res.json()
-    return data.crops
+    )
 }
 
 function normalizeEconomics(
@@ -177,19 +194,45 @@ function normalizeEconomics(
     }
 }
 
-// plannedCrops (planting order) come back first as the "planned" strategy
-export async function fetchStrategies(
+const strategiesKey = (
+    selection: AreaSelection,
+    crops: string[],
+    plannedCrops: string[],
+) => `strategies:${selectionKey(selection)}:${crops}:${plannedCrops}`
+
+export function peekStrategies(
+    selection: AreaSelection,
+    crops: string[],
+    plannedCrops: string[],
+): StrategiesResult | undefined {
+    return peek(strategiesKey(selection, crops, plannedCrops))
+}
+
+// plannedCrops (planting order, repeats allowed) come back first as the
+// "planned" strategy
+export function fetchStrategies(
     selection: AreaSelection,
     crops: string[],
     plannedCrops: string[],
     signal?: AbortSignal,
+): Promise<StrategiesResult> {
+    return memo(
+        strategiesKey(selection, crops, plannedCrops),
+        () => loadStrategies(selection, crops, plannedCrops),
+        signal,
+    )
+}
+
+async function loadStrategies(
+    selection: AreaSelection,
+    crops: string[],
+    plannedCrops: string[],
 ): Promise<StrategiesResult> {
     const area = areaBody(selection)
     const res = await fetch(`${API_URL}/api/strategies`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ crops, plannedCrops, ...area }),
-        signal,
     })
     if (!res.ok) {
         let detail = ""

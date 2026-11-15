@@ -4,6 +4,7 @@ import CropsPage from "./pages/CropsPage/CropsPage"
 import { useCallback, useMemo, useState } from "react"
 import { Field } from "./api/fetchField"
 import { AreaSelection, Bounds } from "./data/point"
+import PlanPage from "./pages/PlanPage/PlanPage"
 import StrategyPage from "./pages/StrategyPage/StrategyPage"
 
 export default function AppRouter() {
@@ -43,6 +44,12 @@ export default function AppRouter() {
         }
         return bounds && { kind: "bounds", bounds }
     }, [bounds, selectedFields])
+
+    // a crop taken off the crops page leaves the plan too
+    const plan = useMemo(
+        () => plannedCrops.filter((id) => selectedCrops.includes(id)),
+        [plannedCrops, selectedCrops],
+    )
 
     return (
         <Routes>
@@ -85,21 +92,11 @@ export default function AppRouter() {
                     ) : selectedCrops.length === 0 ? (
                         <Navigate to="/crops" replace />
                     ) : (
-                        <CropsPage
-                            key="planned"
+                        <PlanPage
                             selection={selection}
-                            selectedCrops={plannedCrops}
-                            onSelectedCropsChange={setPlannedCrops}
-                            onlyCrops={selectedCrops}
-                            ordered
-                            title="Planned rotation"
-                            intro="From the crops you just picked, click the ones you plan to grow in the order you will plant them, then drag the cards to change the order. Your planned rotation is shown first and is the baseline the other strategies are compared with."
-                            back={{ to: "/crops", label: "← Back to crops" }}
-                            next={{
-                                to: "/strategy",
-                                label: "Build strategies →",
-                                emptyLabel: "Skip, build strategies →",
-                            }}
+                            crops={selectedCrops}
+                            plan={plan}
+                            onPlanChange={setPlannedCrops}
                         />
                     )
                 }
@@ -115,7 +112,7 @@ export default function AppRouter() {
                         <StrategyPage
                             selection={selection}
                             crops={selectedCrops}
-                            plannedCrops={plannedCrops}
+                            plannedCrops={plan}
                         />
                     )
                 }
