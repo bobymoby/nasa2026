@@ -1,35 +1,14 @@
 import { API_URL } from "./apiUrl"
 
-export type RiskSeverity = "medium" | "high"
-
 export type RotationIssueKind =
-    | "drought"
-    | "heat"
-    | "waterlogging"
-    | "erosion"
-    | "disease_buildup"
+    "drought" | "heat" | "waterlogging" | "erosion" | "disease_buildup"
 
-export type RotationCause = {
-    severity: RiskSeverity
-    // the crop, or the two crops of a step, that cause it
-    crops: string[]
-    reason: string
-    mitigation: string
-}
-
-export type RotationIssue = {
-    issue: RotationIssueKind
-    // worst severity among the causes
-    severity: RiskSeverity
-    causes: RotationCause[]
-}
-
-// crops in planting order; returns only medium and high risks
+// crops in planting order; returns the possible issues, worst first
 // (an empty list means none)
 export async function fetchRotationRisks(
     crops: string[],
     signal?: AbortSignal,
-): Promise<RotationIssue[]> {
+): Promise<RotationIssueKind[]> {
     const res = await fetch(`${API_URL}/api/crops/rotation-risks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -50,6 +29,6 @@ export async function fetchRotationRisks(
                 : `Failed to check rotation risks (${res.status})`,
         )
     }
-    const data: { issues: RotationIssue[] } = await res.json()
+    const data: { issues: RotationIssueKind[] } = await res.json()
     return data.issues
 }

@@ -1094,40 +1094,11 @@ $profit-height: 170px;
     }
 }
 
-.rotation-risk-grid {
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-}
-
-.risk-causes {
-    margin: 0;
+.rotation-risk-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0 0;
     padding: 0;
     list-style: none;
-
-    li + li {
-        margin-top: 10px;
-        padding-top: 10px;
-        border-top: 1px dashed $page-border;
-    }
-}
-
-.risk-crops {
-    display: block;
-    margin-top: 10px;
-    font-size: 13px;
-    font-weight: 600;
-    color: $page-text;
-
-    small {
-        font-weight: 500;
-        color: $page-muted;
-    }
-}
-
-.rotation-risk-card .risk-causes p {
-    margin-top: 4px;
-}
-
-.risk-mitigation strong {
-    color: $page-text;
-    font-weight: 600;
 }
