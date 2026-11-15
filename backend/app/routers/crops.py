@@ -5,18 +5,15 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
-<<<<<<< HEAD
-from app.services.rotation_risks import CROPS as ROTATION_CROPS
-from app.services.rotation_risks import rotation_risks
-=======
 from app.services.crop_soil_scores import GAEZ_SOIL_CROPS, all_soil_scores
->>>>>>> 1124dd1a87c369223a3813e8956edc7d4bb064e4
 from app.services.crop_suitability import (
     ClimateFeatures,
     SoilFeatures,
     suitable_crops,
     texture_class,
 )
+from app.services.rotation_risks import CROPS as ROTATION_CROPS
+from app.services.rotation_risks import rotation_risks
 
 router = APIRouter(tags=["crops"])
 
