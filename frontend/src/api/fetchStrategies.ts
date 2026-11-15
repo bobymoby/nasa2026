@@ -27,6 +27,36 @@ export type Planting = {
 export type Rating = { score: number; summary: string }
 export type Assessment = { level: Level; summary: string }
 
+export type Money = {
+    revenue: number
+    seedCost: number
+    operatingCost: number
+    totalCost: number
+    profit: number
+}
+
+// estimates in EUR; perHa is one pass through the rotation
+export type Economics = {
+    currency: "EUR"
+    // yield year of the market data used
+    priceYear: number | null
+    areaHa: number
+    perHa: Money
+    profitPerHaYear: number
+    // perHa scaled to the selected area
+    total: Money
+    plantings: {
+        cropName: string
+        role: PlantingRole
+        revenue: number
+        cost: number
+        profit: number
+        // "market <year>", "estimate", "no harvest" or "no price data"
+        source: string
+    }[]
+    byYear: { year: number; revenue: number; cost: number; profit: number }[]
+}
+
 export type Strategy = {
     id: string
     name: string
@@ -52,6 +82,7 @@ export type Strategy = {
         droughtTolerant: Assessment
     }
     marketConsiderations: string[]
+    economics: Economics
 }
 
 export async function fetchStrategies(

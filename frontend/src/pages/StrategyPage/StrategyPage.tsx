@@ -10,6 +10,7 @@ import {
     Strategy,
 } from "../../api/fetchStrategies"
 import { AreaSelection, describeSelection } from "../../data/point"
+import EconomicsSection, { formatSigned } from "./EconomicsSection"
 import RotationTimeline from "./RotationTimeline"
 import WaterChart from "./WaterChart"
 import { humanize, LEVEL_LABELS } from "./labels"
@@ -107,6 +108,9 @@ function StrategyDetail({ strategy }: { strategy: Strategy }) {
                 <p>{strategy.summary}</p>
                 <div className="strategy-tags">
                     <span className="tag">{strategy.durationYears}-year plan</span>
+                    <span className="tag tag-money">
+                        {formatSigned(strategy.economics.profitPerHaYear)}/ha/yr profit
+                    </span>
                     <RiskBadge level={strategy.erosionRisk.level} label="erosion risk" />
                     <RiskBadge level={strategy.waterUse.level} label="water use" />
                 </div>
@@ -116,6 +120,14 @@ function StrategyDetail({ strategy }: { strategy: Strategy }) {
                 <h3>What to plant and when</h3>
                 <RotationTimeline
                     plantings={strategy.plantings}
+                    years={strategy.durationYears}
+                />
+            </section>
+
+            <section>
+                <h3>Estimated cost and profit</h3>
+                <EconomicsSection
+                    economics={strategy.economics}
                     years={strategy.durationYears}
                 />
             </section>
@@ -190,6 +202,7 @@ function ComparisonTable({
                     <tr>
                         <th>Strategy</th>
                         <th>Years</th>
+                        <th>Profit €/ha/yr</th>
                         {RATINGS.map(({ key, label }) => (
                             <th key={key}>{label}</th>
                         ))}
@@ -206,6 +219,11 @@ function ComparisonTable({
                         >
                             <th scope="row">{s.name}</th>
                             <td>{s.durationYears}</td>
+                            <td
+                                className={`cell-money${s.economics.profitPerHaYear < 0 ? " negative" : ""}`}
+                            >
+                                {formatSigned(s.economics.profitPerHaYear)}
+                            </td>
                             {RATINGS.map(({ key }) => (
                                 <td key={key}>
                                     <span className="cell-score">
@@ -308,6 +326,12 @@ function StrategyPage({ selection, crops }: Props) {
                                 <span className="option-meta">
                                     {s.durationYears} years · avg{" "}
                                     {averageScore(s).toFixed(1)}/5
+                                </span>
+                                <span
+                                    className={`option-profit${s.economics.profitPerHaYear < 0 ? " negative" : ""}`}
+                                >
+                                    {formatSigned(s.economics.profitPerHaYear)}
+                                    <small> /ha/yr est. profit</small>
                                 </span>
                                 <span
                                     className={`option-match${s.matchedCrops.length ? "" : " none"}`}

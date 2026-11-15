@@ -1,13 +1,16 @@
 @use "../../styles/tokens" as *;
 @use "../../styles/mixins" as *;
 
+$page-gutter: 32px;
+
+// fills the window; only the card grid scrolls (sideways)
 .crops-page {
     flex: 1;
-    overflow-y: auto;
+    min-height: 0;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
-    // centres a 680px column without a wrapper element
-    padding: 40px max(16px, calc((100% - 680px) / 2)) 64px;
+    padding: 16px $page-gutter 0;
     background:
         radial-gradient(1200px 400px at 50% -10%, rgb(16 185 129 / 12%), transparent 70%),
         $page-bg;
@@ -15,11 +18,14 @@
     font-family: $font-sans;
 
     h1 {
-        margin-top: 20px;
-        margin-bottom: 4px;
-        font-size: 30px;
+        margin: 0;
+        font-size: 26px;
         font-weight: 700;
         letter-spacing: -0.02em;
+    }
+
+    @media (max-width: 600px) {
+        padding: 16px 16px 0;
     }
 
     > p {
@@ -27,9 +33,15 @@
     }
 }
 
+.crops-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+}
+
 .crops-back {
     display: inline-flex;
-    align-self: flex-start;
     align-items: center;
     gap: 6px;
     padding: 6px 12px;
@@ -52,7 +64,8 @@
 }
 
 .crops-area {
-    margin-top: 0;
+    margin: 0;
+    color: $page-muted;
     font-size: 13px;
     font-variant-numeric: tabular-nums;
 }
@@ -84,18 +97,46 @@
     }
 }
 
+$card-width: 280px;
+$grid-gap: 12px; // GRID_GAP in CropsPage.tsx
+
+// the card grid takes all the height left between toolbar and footer and
+// scrolls sideways; full-bleed so cards run to the window edges
+.crops-scroller {
+    @include thin-scrollbar;
+    flex: 1;
+    min-height: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    // room for the hover lift and shadows, which overflow would clip
+    margin: 10px (-$page-gutter) 0;
+    padding: 4px $page-gutter 12px;
+    scroll-padding: 0 $page-gutter;
+    overscroll-behavior-x: contain;
+    scrollbar-color: #cbd5e1 transparent;
+
+    &::-webkit-scrollbar-thumb {
+        background-color: #cbd5e1;
+    }
+}
+
 .crops-list {
     list-style: none;
     padding: 0;
-    margin: 24px 0 16px;
+    margin: 0;
+    height: 100%;
+    width: max-content;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 10px;
+    // rows (set inline from the measured height) fill the grid top to
+    // bottom, then columns flow sideways
+    grid-auto-flow: column;
+    grid-auto-columns: $card-width;
+    gap: $grid-gap;
 
     li label {
         display: flex;
-        align-items: center;
-        gap: 10px;
+        flex-direction: column;
+        gap: 8px;
         height: 100%;
         padding: 12px 14px;
         border-radius: $radius;
@@ -108,11 +149,13 @@
         transition:
             border-color $transition,
             background-color $transition,
-            transform $transition;
+            box-shadow $transition;
 
         &:hover {
             border-color: $accent;
-            transform: translateY(-1px);
+            box-shadow:
+                0 0 0 1px $accent,
+                $shadow-light;
         }
 
         &:has(input:checked) {
@@ -130,6 +173,12 @@
 }
 
 .crops-footer {
+    flex: none;
+    margin: 0 (-$page-gutter);
+    padding: 10px $page-gutter;
+    border-top: 1px solid $page-border;
+    background-color: rgb(246 247 244 / 92%);
+    backdrop-filter: blur(8px);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -153,4 +202,334 @@
         box-shadow: none;
         cursor: default;
     }
+}
+
+
+// ---- crop card --------------------------------------------------------------
+
+$soil-good: $accent;
+$soil-bad: #e34948;
+$soil-bad-text: #b91c1c;
+
+.crop-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.crop-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.crop-family {
+    padding: 2px 8px;
+    border-radius: $radius-pill;
+    background-color: #f1f5f9;
+    color: $page-muted;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.soil-impact {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-weight: 400;
+}
+
+.soil-score {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.soil-score-value {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+.soil-score-text {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-size: 11px;
+    color: $page-muted;
+}
+
+.soil-score-track {
+    height: 6px;
+    border-radius: $radius-pill;
+    background-color: $page-border;
+    overflow: hidden;
+
+    div {
+        height: 100%;
+        border-radius: $radius-pill;
+        background-color: $soil-good;
+    }
+}
+
+.soil-components {
+    display: grid;
+    gap: 2px;
+    line-height: 16px;
+    margin: 0;
+    font-size: 12px;
+
+    > div {
+        display: grid;
+        grid-template-columns: 1fr 112px;
+        align-items: center;
+        gap: 8px;
+    }
+
+    dt {
+        color: $page-muted;
+    }
+
+    dd {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 0;
+    }
+}
+
+.component-track {
+    flex: 1;
+    height: 6px;
+    border-radius: 2px;
+    background-color: #f1f5f9;
+    overflow: hidden;
+
+    span {
+        display: block;
+        height: 100%;
+        border-radius: 2px;
+        background-color: $soil-good;
+    }
+
+    // harm grows from the right so it reads as "taking away"
+    &.negative {
+        display: flex;
+        justify-content: flex-end;
+
+        span {
+            background-color: $soil-bad;
+        }
+    }
+}
+
+.component-value {
+    width: 26px;
+    text-align: right;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: $page-text;
+
+    &.negative {
+        color: $soil-bad-text;
+    }
+}
+
+// clamped so every card fits MIN_CARD_HEIGHT; sits at the bottom of the card
+.soil-note {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin: auto 0 0;
+    padding-top: 8px;
+    border-top: 1px solid $page-border;
+    font-size: 12px;
+    line-height: 1.45;
+    color: $page-muted;
+}
+
+// ---- search & filters -------------------------------------------------------
+
+.crops-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+    margin-top: 12px;
+}
+
+.crops-search {
+    flex: 1;
+    min-width: 220px;
+    padding: 11px 14px 11px 40px;
+    border: 1px solid $page-border;
+    border-radius: $radius;
+    background-color: $page-card;
+    // magnifier icon
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' viewBox='0 0 24 24'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: 14px center;
+    box-shadow: $shadow-light;
+    color: $page-text;
+    font: inherit;
+    font-size: 14px;
+    transition:
+        border-color $transition,
+        box-shadow $transition;
+
+    &::placeholder {
+        color: $page-muted;
+    }
+
+    &:focus {
+        outline: none;
+        border-color: $accent;
+        box-shadow:
+            0 0 0 3px rgb(16 185 129 / 18%),
+            $shadow-light;
+    }
+}
+
+.crops-sort {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: $page-muted;
+
+    select {
+        padding: 10px 12px;
+        border: 1px solid $page-border;
+        border-radius: $radius;
+        background-color: $page-card;
+        color: $page-text;
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+
+        &:focus-visible {
+            outline: 2px solid $accent;
+            outline-offset: 2px;
+        }
+    }
+}
+
+.crops-selected {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.crops-chip {
+    @include button-reset;
+    @include focus-ring($accent);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px 4px 12px;
+    border-radius: $radius-pill;
+    background-color: $accent;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+
+    span {
+        display: grid;
+        place-items: center;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background-color: rgb(255 255 255 / 20%);
+        font-size: 13px;
+        line-height: 1;
+    }
+
+    &:hover span {
+        background-color: rgb(255 255 255 / 35%);
+    }
+}
+
+.crops-results {
+    margin-left: auto;
+    font-size: 12px;
+    color: $page-muted;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.crops-info {
+    padding: 3px 10px;
+    border-radius: $radius-pill;
+    border: 1px dashed $page-border;
+    color: $page-muted;
+    font-size: 12px;
+    cursor: help;
+
+    &::before {
+        content: "i";
+        display: inline-grid;
+        place-items: center;
+        width: 14px;
+        height: 14px;
+        margin-right: 6px;
+        border-radius: 50%;
+        background-color: $page-muted;
+        color: #fff;
+        font-size: 10px;
+        font-weight: 700;
+        font-style: italic;
+    }
+
+    &:focus-visible {
+        outline: 2px solid $accent;
+        outline-offset: 2px;
+    }
+}
+
+.crops-arrows {
+    display: flex;
+    gap: 6px;
+
+    button {
+        @include button-reset;
+        @include focus-ring($accent);
+        display: grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        border: 1px solid $page-border;
+        border-radius: 50%;
+        background-color: $page-card;
+        box-shadow: $shadow-light;
+        color: $page-text;
+        font-size: 18px;
+        line-height: 1;
+        transition:
+            border-color $transition,
+            opacity $transition;
+
+        &:hover:not(:disabled) {
+            border-color: $accent;
+        }
+
+        &:disabled {
+            opacity: 0.4;
+            cursor: default;
+        }
+    }
+}
+
+.crops-empty {
+    margin: 24px 0;
+    text-align: center;
 }

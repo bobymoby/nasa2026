@@ -1,7 +1,23 @@
 import { AreaSelection } from "../data/point"
 import { API_URL } from "./apiUrl"
 
-export type Crop = { id: string; name: string }
+// how the crop affects the soil, from crop_soil_scores
+export type SoilImpact = {
+    crop: string
+    // 0..100
+    score: number | null
+    nitrogenAdded: number | null // 0..3
+    organicMatter: number | null // 0..3
+    soilCover: number | null // 0..3
+    soilDisturbance: number | null // -3..0
+    breakCrop: number | null // 0..2
+    removalCompaction: number | null // -2..0
+    family: string | null
+    note: string | null
+}
+
+// id is the crop_soil_scores key, e.g. "winter_common_soft_wheat"
+export type Crop = { id: string; name: string; soil: SoilImpact }
 
 export async function fetchCrops(
     selection: AreaSelection,

@@ -262,11 +262,42 @@ STRATEGIES: tuple[Strategy, ...] = (
 )
 
 
-def strategies_for(crops: list[str]) -> list[tuple[Strategy, list[str]]]:
-    """All strategies with the requested crops each one uses, best match first."""
+# HCAT codes are hierarchical; the last two digits are the season variant
+# (00 any, 01 winter, 02 spring, 99 unspecified), so code // 100 is the crop
+# itself. A requested crop matches a planting if their crop codes agree.
+HCAT_CROPS = {
+    "wheat": (33010101, 33010102),  # common soft and durum wheat
+    "rye": (33010103,),
+    "barley": (33010104,),
+    "maize": (33010106,),  # grain maize
+    "chickpea": (33010202,),
+    "rapeseed": (33010604,),
+    "sunflower": (33010605,),
+    "alfalfa": (33010903,),
+    "soybean": (33011600,),
+}
+
+
+def _uses(strategy: Strategy, crop: str, hcat3: int | None) -> bool:
+    return any(
+        p.crop_id == crop
+        or (hcat3 is not None and hcat3 // 100 in HCAT_CROPS.get(p.crop_id, ()))
+        for p in strategy.plantings
+    )
+
+
+def strategies_for(
+    crops: list[str], hcat3_by_crop: dict[str, int] | None = None
+) -> list[tuple[Strategy, list[str]]]:
+    """All strategies with the requested crops each one uses, best match first.
+
+    `crops` are crop_soil_scores keys (matched by HCAT code) or the plans'
+    own ids like "wheat".
+    """
+    codes = hcat3_by_crop or {}
     wanted = set(crops)
     matched = [
-        (s, [c for c in crops if any(p.crop_id == c for p in s.plantings)])
+        (s, [c for c in crops if _uses(s, c, codes.get(c))])
         for s in STRATEGIES
     ]
     # stable sort keeps the hand-picked order among equal matches

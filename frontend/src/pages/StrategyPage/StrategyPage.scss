@@ -755,3 +755,294 @@ $water-axis: 56px;
         }
     }
 }
+
+// ---- economics --------------------------------------------------------------
+
+// diverging pair: gains blue, losses red; the sign is always printed too
+$gain: #2a78d6;
+$loss: #e34948;
+$loss-text: #b91c1c;
+
+.negative {
+    color: $loss-text;
+}
+
+.tag-money {
+    background-color: #eff6ff;
+    color: #1e40af;
+}
+
+.option-profit {
+    margin-top: 6px;
+    font-size: 15px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: $page-text;
+
+    small {
+        font-size: 11px;
+        font-weight: 500;
+        color: $page-muted;
+    }
+
+    &.negative {
+        color: $loss-text;
+    }
+}
+
+.cell-money {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.economics {
+    h4 {
+        margin: 24px 0 10px;
+        font-size: 13px;
+        font-weight: 600;
+    }
+}
+
+.stat-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 10px;
+}
+
+.stat-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 14px 16px;
+    border-radius: $radius;
+    border: 1px solid $page-border;
+    background-color: #fbfcfb;
+
+    &.hero {
+        border-color: #a7f3d0;
+        background-color: #ecfdf5;
+
+        .stat-value {
+            font-size: 28px;
+        }
+    }
+}
+
+.stat-label {
+    font-size: 12px;
+    color: $page-muted;
+}
+
+.stat-value {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    color: $page-text;
+
+    &.negative {
+        color: $loss-text;
+    }
+}
+
+.economics-columns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 0 32px;
+}
+
+// ---- profit chart ----
+
+$profit-height: 170px;
+
+.profit-plot {
+    position: relative;
+    display: grid;
+    grid-auto-columns: 1fr;
+    grid-auto-flow: column;
+    gap: 12px;
+    height: $profit-height;
+    // room for the value labels above and below the bars
+    margin: 20px 0;
+}
+
+.profit-zero {
+    position: absolute;
+    left: 0;
+    right: 0;
+    border-top: 1px solid #94a3b8;
+}
+
+.profit-col {
+    position: relative;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+
+    &.hovered .profit-bar {
+        filter: brightness(0.88);
+    }
+}
+
+.profit-bar {
+    position: absolute;
+    width: 100%;
+    max-width: 52px;
+    min-height: 2px;
+    // rounded at the data end, square at the zero line
+    border-radius: 4px 4px 0 0;
+    background-color: $gain;
+    transition: filter $transition;
+
+    &.negative {
+        border-radius: 0 0 4px 4px;
+        background-color: $loss;
+
+        .profit-value {
+            top: 100%;
+            bottom: auto;
+            padding: 4px 0 0;
+            color: $loss-text;
+        }
+    }
+}
+
+.profit-value {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    padding-bottom: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    color: $page-text;
+    font-variant-numeric: tabular-nums;
+}
+
+.profit-tooltip {
+    top: 0;
+    left: 50%;
+    transform: translate(-50%, -100%);
+    min-width: 150px;
+}
+
+.profit-labels {
+    display: grid;
+    grid-auto-columns: 1fr;
+    grid-auto-flow: column;
+    gap: 12px;
+
+    span {
+        text-align: center;
+        font-size: 12px;
+        color: $page-muted;
+    }
+}
+
+// ---- breakdown ----
+
+.cost-breakdown {
+    margin: 0;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+
+    div {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 7px 0;
+        border-bottom: 1px solid $page-border;
+    }
+
+    dt {
+        color: $page-muted;
+    }
+
+    dd {
+        margin: 0;
+        font-weight: 500;
+        white-space: nowrap;
+    }
+
+    .revenue dt,
+    .revenue dd {
+        color: $page-text;
+        font-weight: 600;
+    }
+
+    .result {
+        border-bottom: none;
+        border-top: 2px solid $page-text;
+        margin-top: -1px;
+
+        dt,
+        dd {
+            color: $page-text;
+            font-weight: 700;
+        }
+
+        dd.negative {
+            color: $loss-text;
+        }
+    }
+}
+
+// ---- per-crop table ----
+
+.economics-table {
+    overflow-x: auto;
+    border: 1px solid $page-border;
+    border-radius: $radius;
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+    }
+
+    th,
+    td {
+        padding: 8px 12px;
+        text-align: left;
+        white-space: nowrap;
+        border-bottom: 1px solid $page-border;
+    }
+
+    thead th {
+        @include eyebrow;
+        font-size: 10px;
+        color: $page-muted;
+        background-color: #fbfcfb;
+    }
+
+    tbody tr:last-child td {
+        border-bottom: none;
+    }
+
+    .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .basis {
+        color: $page-muted;
+        font-size: 12px;
+    }
+}
+
+.role-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 8px;
+    border-radius: 50%;
+    vertical-align: middle;
+}
+
+.economics-note {
+    margin: 12px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: $page-muted;
+}

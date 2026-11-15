@@ -1,9 +1,11 @@
+import logging
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
+from app.services.crop_soil_scores import all_soil_scores
 from app.services.crop_suitability import (
     ClimateFeatures,
     SoilFeatures,
@@ -46,23 +48,52 @@ class FieldsRequest(CamelModel):
     fields: list[SelectedField] = Field(min_length=1, max_length=10_000)
 
 
+class SoilImpact(CamelModel):
+    """How the crop affects the soil (crop_soil_scores)."""
+
+    crop: str = Field(description="Row in crop_soil_scores")
+    score: int | None = Field(description="Soil health score, 0..100")
+    nitrogen_added: int | None = Field(description="Nitrogen added (legumes), 0..3")
+    organic_matter: int | None = Field(description="Roots and residue building organic matter, 0..3")
+    soil_cover: float | None = Field(description="Time the soil is covered by living plants, 0..3")
+    soil_disturbance: int | None = Field(description="Ploughing, digging at harvest, -3..0")
+    break_crop: int | None = Field(description="Interrupts disease cycles, feeds soil life, 0..2")
+    removal_compaction: int | None = Field(description="Whole-plant removal or compaction, -2..0")
+    family: str | None
+    note: str | None
+
+
 class Crop(CamelModel):
-    id: str
+    id: str = Field(description="crop_soil_scores key, e.g. winter_common_soft_wheat")
     name: str
+    soil: SoilImpact
 
 
 class CropsResponse(CamelModel):
     crops: list[Crop]
 
 
-# TODO: replace with real logic based on the selected area
-STUB_CROPS = [
-    Crop(id="wheat", name="Wheat"),
-    Crop(id="maize", name="Maize"),
-    Crop(id="sunflower", name="Sunflower"),
-    Crop(id="barley", name="Barley"),
-    Crop(id="rapeseed", name="Rapeseed"),
-]
+log = logging.getLogger(__name__)
+
+def _crop_name(key: str) -> str:
+    # "winter_common_soft_wheat" -> "Winter common soft wheat"
+    words = key.replace("_", " ")
+    return words[:1].upper() + words[1:]
+
+
+# TODO: filter by what suits the selected area
+def _all_crops() -> CropsResponse:
+    try:
+        scores = all_soil_scores()
+    except Exception as e:
+        log.exception("could not load crop_soil_scores")
+        raise HTTPException(503, "Crop data is unavailable") from e
+    return CropsResponse(
+        crops=[
+            Crop(id=s.crop, name=_crop_name(s.crop), soil=SoilImpact(**vars(s)))
+            for s in scores
+        ]
+    )
 
 
 @router.post(
@@ -72,7 +103,7 @@ STUB_CROPS = [
     summary="Crops available in a rectangle",
 )
 def crops_for_bounds(bounds: Bounds) -> CropsResponse:
-    return CropsResponse(crops=STUB_CROPS)
+    return _all_crops()
 
 
 @router.post(
@@ -82,7 +113,7 @@ def crops_for_bounds(bounds: Bounds) -> CropsResponse:
     summary="Crops available on a set of selected fields",
 )
 def crops_for_fields(selection: FieldsRequest) -> CropsResponse:
-    return CropsResponse(crops=STUB_CROPS)
+    return _all_crops()
 
 
 # ------------------------------------------------------------ suitability

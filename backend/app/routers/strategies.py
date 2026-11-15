@@ -1,3 +1,4 @@
+import logging
 from typing import Literal
 
 from fastapi import APIRouter
@@ -5,6 +6,10 @@ from pydantic import Field, model_validator
 
 from app.routers.crops import Bounds, CamelModel, SelectedField
 from app.services import strategies as svc
+from app.services import strategy_economics as econ
+from app.services.crop_soil_scores import hcat3_codes
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["strategies"])
 
@@ -20,6 +25,15 @@ class StrategiesRequest(CamelModel):
         if (self.bounds is None) == (self.fields is None):
             raise ValueError("send exactly one of bounds or fields")
         return self
+
+    def area_ha(self) -> float:
+        if self.bounds:
+            tl, br = self.bounds.top_left, self.bounds.bottom_right
+            ring = [(tl.lat, tl.lng), (tl.lat, br.lng), (br.lat, br.lng), (br.lat, tl.lng)]
+            return econ.polygon_area_ha(ring)
+        return sum(
+            econ.polygon_area_ha([(p.lat, p.lng) for p in f.polygon]) for f in self.fields or []
+        )
 
 
 class MonthRef(CamelModel):
@@ -68,6 +82,44 @@ class CropRoles(CamelModel):
     drought_tolerant: Assessment
 
 
+class Money(CamelModel):
+    revenue: float
+    seed_cost: float
+    operating_cost: float
+    total_cost: float
+    profit: float
+
+
+class PlantingMoney(CamelModel):
+    crop_name: str
+    role: Literal["cash", "cover", "forage"]
+    revenue: float
+    cost: float
+    profit: float
+    source: str
+
+
+class YearMoney(CamelModel):
+    year: int
+    revenue: float
+    cost: float
+    profit: float
+
+
+class Economics(CamelModel):
+    currency: Literal["EUR"] = "EUR"
+    # latest yield year of the market data used; null if none was used
+    price_year: int | None
+    area_ha: float
+    # one pass through the rotation, per hectare
+    per_ha: Money
+    profit_per_ha_year: float
+    # per_ha scaled to the selected area
+    total: Money
+    plantings: list[PlantingMoney]
+    by_year: list[YearMoney]
+
+
 class Strategy(CamelModel):
     id: str
     name: str
@@ -80,6 +132,7 @@ class Strategy(CamelModel):
     water_use: WaterUse
     crop_roles: CropRoles
     market_considerations: list[str]
+    economics: Economics
 
 
 class StrategiesResponse(CamelModel):
@@ -94,7 +147,44 @@ def _assessment(a: svc.Assessment | svc.CropRole) -> Assessment:
     return Assessment(level=a.importance if isinstance(a, svc.CropRole) else a.level, summary=a.summary)
 
 
-def _to_model(s: svc.Strategy, matched: list[str]) -> Strategy:
+def _money(e: econ.StrategyEconomics, scale: float = 1.0) -> Money:
+    return Money(
+        revenue=round(e.revenue * scale),
+        seed_cost=round(e.seed_cost * scale),
+        operating_cost=round(e.operating_cost * scale),
+        total_cost=round(e.total_cost * scale),
+        profit=round(e.profit * scale),
+    )
+
+
+def _economics(e: econ.StrategyEconomics, area_ha: float) -> Economics:
+    return Economics(
+        price_year=e.price_year,
+        area_ha=round(area_ha, 2),
+        per_ha=_money(e),
+        profit_per_ha_year=round(e.profit / e.years),
+        total=_money(e, area_ha),
+        plantings=[
+            PlantingMoney(
+                crop_name=p.planting.crop_name,
+                role=p.planting.role,
+                revenue=round(p.revenue),
+                cost=round(p.cost),
+                profit=round(p.revenue - p.cost),
+                source=p.source,
+            )
+            for p in e.plantings
+        ],
+        by_year=[
+            YearMoney(year=i + 1, revenue=round(r), cost=round(c), profit=round(r - c))
+            for i, (r, c) in enumerate(e.by_year())
+        ],
+    )
+
+
+def _to_model(
+    s: svc.Strategy, matched: list[str], economics: Economics
+) -> Strategy:
     return Strategy(
         id=s.id,
         name=s.name,
@@ -135,6 +225,7 @@ def _to_model(s: svc.Strategy, matched: list[str]) -> Strategy:
             drought_tolerant=_assessment(s.drought_tolerant),
         ),
         market_considerations=list(s.market_considerations),
+        economics=economics,
     )
 
 
@@ -146,6 +237,21 @@ def _to_model(s: svc.Strategy, matched: list[str]) -> Strategy:
 )
 def strategies(request: StrategiesRequest) -> StrategiesResponse:
     # TODO: use the area (soil, climate) instead of hard-coded plans
+    area_ha = request.area_ha()
+    try:
+        codes = hcat3_codes(request.crops)
+    except Exception:
+        # still matches the plans' own crop ids
+        log.exception("could not look up HCAT codes")
+        codes = {}
+
     return StrategiesResponse(
-        strategies=[_to_model(s, matched) for s, matched in svc.strategies_for(request.crops)]
+        strategies=[
+            _to_model(
+                s,
+                matched,
+                _economics(econ.strategy_economics(s), area_ha),
+            )
+            for s, matched in svc.strategies_for(request.crops, codes)
+        ]
     )
