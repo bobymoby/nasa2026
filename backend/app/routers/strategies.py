@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.routers.crops import Bounds, CamelModel, SelectedField
+from app.services import cap_payments as cap
 from app.services import strategies as svc
 from app.services import strategy_economics as econ
 from app.geo import Rect
@@ -235,6 +236,19 @@ class Economics(CamelModel):
     total: Money
     plantings: list[PlantingMoney]
     by_year: list[YearMoney]
+    cap_payments: list["CapPayment"]
+    cap_per_ha: float = Field(description="EU CAP payments per ha over one pass through the rotation")
+    profit_with_cap_per_ha_year: float
+    total_profit_with_cap: float
+
+
+class CapPayment(CamelModel):
+    name: str
+    eur_per_ha: float = Field(description="Over one pass through the rotation")
+    interventions: list[str]
+    claim_year: int
+    source: str
+    assumption: str | None
 
 
 class Strategy(CamelModel):
@@ -292,8 +306,22 @@ def _market(request: AreaRequest) -> Market:
 
 
 def _economics(strategy: dict, area_ha: float, market: Market) -> Economics:
-    e = econ.strategy_economics(strategy["plantings"], strategy["duration_years"], market)
+    e = econ.strategy_economics(strategy["plantings"], strategy["duration_years"], market, area_ha)
     return Economics(
+        cap_payments=[
+            CapPayment(
+                name=line.name,
+                eur_per_ha=round(line.eur_per_ha),
+                interventions=line.interventions,
+                claim_year=line.claim_year,
+                source=cap.SOURCE,
+                assumption=line.assumption or None,
+            )
+            for line in e.cap
+        ],
+        cap_per_ha=round(e.cap_total),
+        profit_with_cap_per_ha_year=round(e.profit_with_cap / e.years),
+        total_profit_with_cap=round(e.profit_with_cap * area_ha),
         country=e.country,
         price_year=e.price_year,
         complete=e.complete,
@@ -381,6 +409,7 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
         market_job = pool.submit(_market, request)
         site_job = pool.submit(site_inputs, *request.site_area())
         market, site = market_job.result(), site_job.result()
+    area_ha = request.area_ha()
     crop_markets = {c: market.crops.get(econ.market_id(c)) for c in svc.CROP_BY_ID}
     territory = {
         "bounds": request.bounds.model_dump(by_alias=True) if request.bounds else None,
@@ -400,7 +429,14 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
         "baseline_rotation": (
             request.baseline_rotation or request.planned_crops or list(svc.DEFAULT_BASELINE)
         ),
-        "crop_profit_eur_ha": {c: econ.crop_profit_eur_ha(c, market) for c in svc.CROP_BY_ID},
+        # area-wide payments (BISS, CRISS) are the same for every plan, so only
+        # the crop- and practice-specific ones affect the ranking
+        "crop_profit_eur_ha": {
+            c: econ.crop_profit_eur_ha(c, market) + cap.crop_payment_eur_ha(c, area_ha)
+            for c in svc.CROP_BY_ID
+        },
+        "cover_payment_eur_ha": cap.cover_payment_eur_ha(area_ha),
+        "area_ha": area_ha,
         "strategy_weights": {
             name: weights.model_dump(exclude_none=True)
             for name, weights in (request.strategy_weights or {}).items()
@@ -440,7 +476,6 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
     for ranking, strategy in enumerate(ranked, start=1):
         strategy["ranking"] = ranking
 
-    area_ha = request.area_ha()
     if not ranked:
         raise HTTPException(
             422,
@@ -461,6 +496,10 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
             f"({market.country}, Eurostat or FAOSTAT, in {market.price_year or 'current'} euros); "
             "crops without published figures or a cost estimate are left out of the totals and flagged.",
             "Seed, operating and cover-crop costs are typical estimates, not measured farm budgets.",
+            "EU CAP payments are the amounts Bulgaria actually paid per hectare for claim year 2024 "
+            f"({cap.SOURCE}); they assume the farmer applies and meets each scheme's conditions, "
+            "and the selected area is treated as the whole farm. Coupled support and eco-schemes "
+            "count towards the ranking; BISS and CRISS are the same for every plan.",
             "Crop calendars, plant families, traits, return gaps and humus balances come from "
             "crop_agronomy.csv (FAO-56, FAO-33, VDLUFA); its nitrogen-fixation and drought-tolerance "
             "values have no individual citations.",

@@ -14,11 +14,15 @@ A crop missing its market figures or its cost estimate is left out of the
 totals and marks the strategy incomplete; nothing is filled in by hand.
 
 Money is attributed to the harvest year; a forage ley is split per season.
+
+EU CAP payments (`cap_payments`) are kept apart from the market profit, so
+`profit` is what the crops earn and `profit_with_cap` adds the payments.
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from app.services import cap_payments
 from app.services.prices.pipeline import CropMarket, Market
 
 NO_MARKET_DATA = "no market data"
@@ -110,6 +114,15 @@ class StrategyEconomics:
     years: int
     country: str
     price_year: int | None
+    cap: list[cap_payments.CapLine] = field(default_factory=list)
+
+    @property
+    def cap_total(self) -> float:
+        return sum(line.eur_per_ha for line in self.cap)
+
+    @property
+    def profit_with_cap(self) -> float:
+        return self.profit + self.cap_total
 
     @property
     def revenue(self) -> float:
@@ -227,13 +240,16 @@ def _planting_economics(p: dict, market: Market) -> PlantingEconomics:
     )
 
 
-def strategy_economics(plantings: list[dict], years: int, market: Market) -> StrategyEconomics:
+def strategy_economics(
+    plantings: list[dict], years: int, market: Market, area_ha: float = 0.0,
+) -> StrategyEconomics:
     """Per-hectare economics of one pass through a generated rotation."""
     return StrategyEconomics(
         plantings=[_planting_economics(p, market) for p in plantings],
         years=years,
         country=market.country,
         price_year=market.price_year,
+        cap=cap_payments.cap_lines(plantings, years, area_ha),
     )
 
 
