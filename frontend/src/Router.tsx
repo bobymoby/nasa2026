@@ -91,8 +91,9 @@ export default function AppRouter() {
                             selectedCrops={plannedCrops}
                             onSelectedCropsChange={setPlannedCrops}
                             onlyCrops={selectedCrops}
+                            ordered
                             title="Planned rotation"
-                            intro="From the crops you just picked, choose the ones you plan to grow, in the order you will plant them. Your planned rotation is shown first and is the baseline the other strategies are compared with."
+                            intro="From the crops you just picked, click the ones you plan to grow in the order you will plant them, then drag the cards to change the order. Your planned rotation is shown first and is the baseline the other strategies are compared with."
                             back={{ to: "/crops", label: "← Back to crops" }}
                             next={{
                                 to: "/strategy",

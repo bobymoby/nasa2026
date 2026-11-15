@@ -18,7 +18,7 @@ import {
 } from "../../api/fetchCrops"
 import { fetchPlannableCrops } from "../../api/fetchStrategies"
 import { AreaSelection, describeSelection } from "../../data/point"
-import CropCard from "./CropCard"
+import CropCard, { CardDrag, DropSide } from "./CropCard"
 import ScoreInfo from "./ScoreInfo"
 import { ListedCrop, listCrops } from "./listedCrops"
 import { useSmoothHorizontalScroll } from "./useSmoothHorizontalScroll"
@@ -50,6 +50,9 @@ type Props = {
     next: PageLink & { emptyLabel?: string }
     // limits the cards to these crop ids
     onlyCrops?: string[]
+    // the selection is a planting sequence: cards show their position and the
+    // footer can reorder it
+    ordered?: boolean
 }
 
 function CropsPage({
@@ -61,6 +64,7 @@ function CropsPage({
     back = { to: "/", label: "← Back to map" },
     next,
     onlyCrops,
+    ordered = false,
 }: Props) {
     const [gaez, setGaez] = useState<CropsResult | null>(null)
     const [gaezError, setGaezError] = useState<string | null>(null)
@@ -144,6 +148,16 @@ function CropsPage({
             .sort(SORTERS[sort])
     }, [shown, deferredQuery, sort])
 
+    const selectedSet = useMemo(() => new Set(selectedCrops), [selectedCrops])
+
+    // the planned rotation lists its sequence first, in planting order
+    const displayed = useMemo(() => {
+        if (!ordered) return filtered
+        const byCrop = new Map(filtered.map((c) => [c.id, c]))
+        const picked = selectedCrops.flatMap((id) => byCrop.get(id) ?? [])
+        return [...picked, ...filtered.filter((c) => !selectedSet.has(c.id))]
+    }, [ordered, filtered, selectedCrops, selectedSet])
+
     const ready = gaez !== null && plannable !== null
 
     const scrollerRef = useRef<HTMLDivElement>(null)
@@ -198,7 +212,59 @@ function CropsPage({
                 : [...current, id],
         )
     }, [])
-    const selectedSet = useMemo(() => new Set(selectedCrops), [selectedCrops])
+    const move = useCallback((id: string, by: -1 | 1) => {
+        const next = [...selectedRef.current]
+        const from = next.indexOf(id)
+        const to = from + by
+        if (from < 0 || to < 0 || to >= next.length) return
+        ;[next[from], next[to]] = [next[to], next[from]]
+        onChangeRef.current(next)
+    }, [])
+    const [dragged, setDragged] = useState<string | null>(null)
+    const [dropTarget, setDropTarget] = useState<{
+        id: string
+        side: DropSide
+    } | null>(null)
+    const dropTargetRef = useRef(dropTarget)
+    dropTargetRef.current = dropTarget
+    const draggedRef = useRef(dragged)
+    draggedRef.current = dragged
+    // a dragged crop lands before or after the card it is dropped on; dropping
+    // on an unpicked crop sends it to the end of the sequence
+    const drag = useMemo<CardDrag>(
+        () => ({
+            start: (id) => setDragged(id),
+            over: (id, side) =>
+                setDropTarget((prev) =>
+                    prev?.id === id && prev.side === side ? prev : { id, side },
+                ),
+            drop: () => {
+                const id = draggedRef.current
+                const target = dropTargetRef.current
+                setDragged(null)
+                setDropTarget(null)
+                if (!id || !target || target.id === id) return
+                const rest = selectedRef.current.filter((c) => c !== id)
+                const at = rest.indexOf(target.id)
+                if (at < 0) {
+                    if (selectedRef.current.includes(id))
+                        onChangeRef.current([...rest, id])
+                    return
+                }
+                rest.splice(target.side === "after" ? at + 1 : at, 0, id)
+                onChangeRef.current(rest)
+            },
+            end: () => {
+                setDragged(null)
+                setDropTarget(null)
+            },
+        }),
+        [],
+    )
+    const position = useMemo(
+        () => new Map(selectedCrops.map((id, i) => [id, i + 1])),
+        [selectedCrops],
+    )
 
     const errors = [gaezError, soilError, plannableError].filter(Boolean)
     const cells = gaez
@@ -294,17 +360,35 @@ function CropsPage({
             {ready ? (
                 <div className="crops-scroller" ref={scrollerRef}>
                     <ul
-                        className="crops-list"
-                        style={{
-                            gridTemplateRows: `repeat(${rows}, minmax(${MIN_CARD_HEIGHT}px, 1fr))`,
-                        }}
+                        className={`crops-list${ordered ? " crops-list-ordered" : ""}`}
+                        style={
+                            ordered
+                                ? undefined
+                                : {
+                                      gridTemplateRows: `repeat(${rows}, minmax(${MIN_CARD_HEIGHT}px, 1fr))`,
+                                  }
+                        }
                     >
-                        {filtered.map((crop) => (
+                        {displayed.map((crop) => (
                             <CropCard
                                 key={crop.id}
                                 crop={crop}
                                 checked={selectedSet.has(crop.id)}
+                                order={
+                                    ordered
+                                        ? (position.get(crop.id) ?? 0)
+                                        : undefined
+                                }
                                 onToggle={toggle}
+                                drag={ordered ? drag : undefined}
+                                dragging={dragged === crop.id}
+                                dropSide={
+                                    dragged &&
+                                    dropTarget?.id === crop.id &&
+                                    dropTarget.id !== dragged
+                                        ? dropTarget.side
+                                        : undefined
+                                }
                             />
                         ))}
                     </ul>
@@ -314,23 +398,71 @@ function CropsPage({
             )}
 
             <div className="crops-footer">
-                <div className="crops-selected">
-                    <span className="crops-count">
-                        {selectedCrops.length} selected
-                    </span>
-                    {selectedCrops.map((id) => (
-                        <button
-                            key={id}
-                            type="button"
-                            className="crops-chip"
-                            onClick={() => toggle(id)}
-                            aria-label={`Remove ${byId.get(id)?.name ?? id}`}
-                        >
-                            {byId.get(id)?.name ?? id}
-                            <span aria-hidden="true">×</span>
-                        </button>
-                    ))}
-                </div>
+                {ordered ? (
+                    <ol className="crops-selected crops-sequence">
+                        <li className="crops-count">
+                            {selectedCrops.length > 0
+                                ? "Planting order"
+                                : "Click crops in the order you plant them"}
+                        </li>
+                        {selectedCrops.map((id, i) => {
+                            const name = byId.get(id)?.name ?? id
+                            return (
+                                <li key={id} className="crops-step">
+                                    <span className="crops-step-chip">
+                                        <span className="crops-step-number">
+                                            {i + 1}
+                                        </span>
+                                        {name}
+                                        <button
+                                            type="button"
+                                            disabled={i === 0}
+                                            onClick={() => move(id, -1)}
+                                            aria-label={`Plant ${name} earlier`}
+                                        >
+                                            ‹
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={
+                                                i === selectedCrops.length - 1
+                                            }
+                                            onClick={() => move(id, 1)}
+                                            aria-label={`Plant ${name} later`}
+                                        >
+                                            ›
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => toggle(id)}
+                                            aria-label={`Remove ${name}`}
+                                        >
+                                            ×
+                                        </button>
+                                    </span>
+                                </li>
+                            )
+                        })}
+                    </ol>
+                ) : (
+                    <div className="crops-selected">
+                        <span className="crops-count">
+                            {selectedCrops.length} selected
+                        </span>
+                        {selectedCrops.map((id) => (
+                            <button
+                                key={id}
+                                type="button"
+                                className="crops-chip"
+                                onClick={() => toggle(id)}
+                                aria-label={`Remove ${byId.get(id)?.name ?? id}`}
+                            >
+                                {byId.get(id)?.name ?? id}
+                                <span aria-hidden="true">×</span>
+                            </button>
+                        ))}
+                    </div>
+                )}
                 {selectedCrops.length > 0 || next.emptyLabel ? (
                     <Link to={next.to} className="crops-next">
                         {selectedCrops.length > 0
