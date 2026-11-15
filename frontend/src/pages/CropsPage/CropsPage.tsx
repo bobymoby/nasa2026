@@ -83,19 +83,26 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
         [gaez, soil],
     )
 
+    // a crop needs both a GAEZ rating and a soil score to be offered; if the
+    // soil scores failed to load, fall back to the GAEZ rating alone
+    const complete = useMemo(
+        () => all.filter((c) => c.gaez && (c.soil || soilError)),
+        [all, soilError],
+    )
+
     // drop picked crops not offered for this area; wait for both sources so
     // nothing is dropped while one is still loading
     useEffect(() => {
         if (!gaez || !soil) return
-        const available = new Set(all.map((c) => c.id))
+        const available = new Set(complete.map((c) => c.id))
         const kept = selectedCrops.filter((id) => available.has(id))
         if (kept.length !== selectedCrops.length) onSelectedCropsChange(kept)
-    }, [all, gaez, soil, selectedCrops, onSelectedCropsChange])
+    }, [complete, gaez, soil, selectedCrops, onSelectedCropsChange])
 
     // where nothing reaches "medium", offer the best-rated crops anyway so
     // there is always something to plan with
     const { shown, fallback } = useMemo(() => {
-        const rated = all.filter((c) => c.gaez)
+        const rated = complete
         const suited = rated.filter(
             (c) => c.gaez!.suitability >= MIN_SUITABILITY,
         )
@@ -106,7 +113,7 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
             .sort((a, b) => b.gaez!.suitability - a.gaez!.suitability)
             .slice(0, FALLBACK_COUNT)
         return { shown: best, fallback: true }
-    }, [all])
+    }, [complete])
 
     const filtered = useMemo(() => {
         const words = deferredQuery.toLowerCase().split(/\s+/).filter(Boolean)
@@ -115,7 +122,7 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
             .sort(SORTERS[sort])
     }, [shown, deferredQuery, sort])
 
-    const ready = gaez !== null
+    const ready = gaez !== null && (soil !== null || soilError !== null)
 
     const scrollerRef = useRef<HTMLDivElement>(null)
     const scroller = useSmoothHorizontalScroll(scrollerRef, [ready])
