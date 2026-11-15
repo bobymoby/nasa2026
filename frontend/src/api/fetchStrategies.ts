@@ -1,32 +1,7 @@
 import { AreaSelection } from "../data/point"
 import { API_URL } from "./apiUrl"
 
-// the backend gives up on slow site sources after 20 s; this covers a hung server
-const CONTEXT_TIMEOUT_MS = 30_000
-
-function areaBody(selection: AreaSelection) {
-    return selection.kind === "bounds"
-        ? { bounds: selection.bounds }
-        : { fields: selection.fields }
-}
-
-// crops with complete planning data (agronomy, prices, yields, costs) for the area
-export async function fetchPlannableCrops(
-    selection: AreaSelection,
-    signal?: AbortSignal,
-): Promise<string[]> {
-    const res = await fetch(`${API_URL}/api/strategies/crops`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(areaBody(selection)),
-        signal,
-    })
-    if (!res.ok)
-        throw new Error(`Failed to load plannable crops (${res.status})`)
-    const data: { crops: string[] } = await res.json()
-    return data.crops
-}
-
+// "unknown" when the data behind an assessment is unavailable
 export type Level = "low" | "medium" | "high" | "unknown"
 export type PlantingRole = "cash" | "cover" | "forage"
 export type Trait =
@@ -41,8 +16,8 @@ export type Planting = {
     role: PlantingRole
     start: MonthRef
     end: MonthRef
-    // total over the whole planting
-    waterUseMm: number
+    // total over the whole planting; null without climate data
+    waterUseMm: number | null
     traits: Trait[]
     note: string
 }
@@ -50,35 +25,52 @@ export type Planting = {
 export type Rating = { score: number; summary: string }
 export type Assessment = { level: Level; summary: string }
 
-// gross revenue in EUR; revenuePerHa is one pass through the rotation
+export type EconomicsMoney = {
+    revenue: number
+    seedCost: number
+    operatingCost: number
+    totalCost: number
+    profit: number
+}
+
+// Current backend contract matches the data returned by app.routers.strategies.
+// Legacy compatibility aliases are kept to support older frontend code paths.
 export type Economics = {
     currency: "EUR"
     // ISO alpha-2 country whose market figures are used
     country: string
     // prices are real euros of this year
-    priceYear: number
+    priceYear: number | null
+    // false when a crop lacks a published yield, price or cost estimate and is left out of the totals
+    complete: boolean
+    missingData: string[]
     areaHa: number
-    revenuePerHa: number
-    revenuePerHaYear: number
-    // revenuePerHa over the whole rotation, scaled to the selected area
-    totalRevenue: number
+    perHa: EconomicsMoney
+    profitPerHaYear: number
+    total: EconomicsMoney
     plantings: {
         cropName: string
         role: PlantingRole
-        yieldTHa: number
-        priceEurT: number
+        yieldTHa: number | null
+        priceEurT: number | null
         revenue: number
+        cost: number
+        profit: number
         // "price eurostat 2020–2024, yield eurostat 2021–2025"
         source: string
     }[]
-    byYear: { year: number; revenue: number }[]
+    byYear: { year: number; revenue: number; cost: number; profit: number }[]
+    // Legacy compatibility values for older code paths; computed when absent.
+    revenuePerHa?: number
+    revenuePerHaYear?: number
+    totalRevenue?: number
 }
 
 export type Strategy = {
     id: string
     strategyType:
         | "current"
-        | "revenue_first"
+        | "profit_first"
         | "soil_builder"
         | "risk_balanced"
         | "water_efficient"
@@ -89,6 +81,8 @@ export type Strategy = {
     // the requested crop ids this plan grows
     matchedCrops: string[]
     rotation: string[]
+    // crops the plan adds to the selection for its goal
+    addedCrops: string[]
     plantings: Planting[]
     ratings: {
         nutrientCycling: Rating
@@ -115,6 +109,56 @@ export type StrategiesResult = {
     strategies: Strategy[]
 }
 
+function areaBody(selection: AreaSelection) {
+    return selection.kind === "bounds"
+        ? { bounds: selection.bounds }
+        : { fields: selection.fields }
+}
+
+export async function fetchPlannableCrops(
+    selection: AreaSelection,
+    signal?: AbortSignal,
+): Promise<string[]> {
+    const res = await fetch(`${API_URL}/api/strategies/crops`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(areaBody(selection)),
+        signal,
+    })
+    if (!res.ok) {
+        throw new Error(`Failed to load plannable crops (${res.status})`)
+    }
+    const data: { crops: string[] } = await res.json()
+    return data.crops
+}
+
+function normalizeEconomics(economics: Economics, durationYears: number): Economics {
+    const perHa = economics.perHa ?? {
+        revenue: economics.revenuePerHa ?? 0,
+        seedCost: 0,
+        operatingCost: 0,
+        totalCost: 0,
+        profit: 0,
+    }
+    const total = economics.total ?? {
+        revenue: economics.totalRevenue ?? 0,
+        seedCost: 0,
+        operatingCost: 0,
+        totalCost: 0,
+        profit: 0,
+    }
+    return {
+        ...economics,
+        perHa,
+        total,
+        revenuePerHa: economics.revenuePerHa ?? perHa.revenue,
+        revenuePerHaYear:
+            economics.revenuePerHaYear ??
+            (durationYears > 0 ? perHa.revenue / durationYears : perHa.revenue),
+        totalRevenue: economics.totalRevenue ?? total.revenue,
+    }
+}
+
 // currentCrops (planting order) come back first as the "current" strategy
 export async function fetchStrategies(
     selection: AreaSelection,
@@ -123,72 +167,10 @@ export async function fetchStrategies(
     signal?: AbortSignal,
 ): Promise<StrategiesResult> {
     const area = areaBody(selection)
-    const contextArea =
-        selection.kind === "bounds"
-            ? {
-                  plots: [
-                      [
-                          [
-                              selection.bounds.topLeft.lat,
-                              selection.bounds.topLeft.lng,
-                          ],
-                          [
-                              selection.bounds.topLeft.lat,
-                              selection.bounds.bottomRight.lng,
-                          ],
-                          [
-                              selection.bounds.bottomRight.lat,
-                              selection.bounds.bottomRight.lng,
-                          ],
-                          [
-                              selection.bounds.bottomRight.lat,
-                              selection.bounds.topLeft.lng,
-                          ],
-                      ],
-                  ],
-              }
-            : { fields: selection.fields }
-
-    let siteContext: unknown
-    const context = new AbortController()
-    const abortContext = () => context.abort()
-    signal?.addEventListener("abort", abortContext)
-    const timer = setTimeout(abortContext, CONTEXT_TIMEOUT_MS)
-    try {
-        const contextResponse = await fetch(
-            `${API_URL}/api/fields/strategy-context`,
-            {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(contextArea),
-                signal: context.signal,
-            },
-        )
-        if (!contextResponse.ok) {
-            throw new Error(
-                `Failed to load field data (${contextResponse.status})`,
-            )
-        }
-        siteContext = await contextResponse.json()
-    } catch (error) {
-        if (signal?.aborted || !context.signal.aborted) throw error
-        throw new Error(
-            `Field data took longer than ${CONTEXT_TIMEOUT_MS / 1000} s to load; try again.`,
-        )
-    } finally {
-        clearTimeout(timer)
-        signal?.removeEventListener("abort", abortContext)
-    }
-
     const res = await fetch(`${API_URL}/api/strategies`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            crops,
-            currentCrops,
-            ...area,
-            siteContext,
-        }),
+        body: JSON.stringify({ crops, currentCrops, ...area }),
         signal,
     })
     if (!res.ok) {
@@ -221,5 +203,11 @@ export async function fetchStrategies(
         )
     }
     const data: StrategiesResult = await res.json()
-    return data
+    return {
+        ...data,
+        strategies: data.strategies.map((strategy) => ({
+            ...strategy,
+            economics: normalizeEconomics(strategy.economics, strategy.durationYears),
+        })),
+    }
 }

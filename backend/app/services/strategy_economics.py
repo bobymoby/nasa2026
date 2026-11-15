@@ -180,6 +180,11 @@ def _season(crop_id: str, market: Market) -> tuple[float | None, float | None, f
     return m.yield_t_ha, m.price_eur_t, m.yield_t_ha * m.price_eur_t, _basis(m)
 
 
+def plannable(crop_id: str, market: Market) -> bool:
+    """A harvested crop whose revenue and costs can both be counted."""
+    return _costs(crop_id) is not None and _season(crop_id, market)[3] != NO_MARKET_DATA
+
+
 def crop_profit_eur_ha(crop_id: str, market: Market) -> float:
     """Profit of one season of a harvested crop, as the economics below counts it."""
     costs = _costs(crop_id)
