@@ -18,15 +18,16 @@ import {
 } from "../../api/fetchCrops"
 import { AreaSelection, describeSelection } from "../../data/point"
 import CropCard from "./CropCard"
+import ScoreInfo from "./ScoreInfo"
 import { ListedCrop, mergeCrops } from "./listedCrops"
 import { useSmoothHorizontalScroll } from "./useSmoothHorizontalScroll"
 
 // smallest height a card fits in; keep in sync with the card styles
 const MIN_CARD_HEIGHT = 250
 const GRID_GAP = 12
+const FALLBACK_COUNT = 12
 
 type SortKey = "suitability" | "soil" | "name"
-type View = "suited" | "all"
 
 const SORTERS: Record<SortKey, (a: ListedCrop, b: ListedCrop) => number> = {
     suitability: (a, b) =>
@@ -48,7 +49,6 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
     const [soil, setSoil] = useState<SoilScoredCrop[] | null>(null)
     const [soilError, setSoilError] = useState<string | null>(null)
     const [reloadKey, setReloadKey] = useState(0)
-    const [view, setView] = useState<View>("suited")
     const [query, setQuery] = useState("")
     const [sort, setSort] = useState<SortKey>("suitability")
     const deferredQuery = useDeferredValue(query)
@@ -92,15 +92,21 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
         if (kept.length !== selectedCrops.length) onSelectedCropsChange(kept)
     }, [all, gaez, soil, selectedCrops, onSelectedCropsChange])
 
-    const shown = useMemo(
-        () =>
-            view === "suited"
-                ? all.filter(
-                      (c) => c.gaez && c.gaez.suitability >= MIN_SUITABILITY,
-                  )
-                : all,
-        [all, view],
-    )
+    // where nothing reaches "medium", offer the best-rated crops anyway so
+    // there is always something to plan with
+    const { shown, fallback } = useMemo(() => {
+        const rated = all.filter((c) => c.gaez)
+        const suited = rated.filter(
+            (c) => c.gaez!.suitability >= MIN_SUITABILITY,
+        )
+        if (suited.length > 0 || rated.length === 0) {
+            return { shown: suited, fallback: false }
+        }
+        const best = [...rated]
+            .sort((a, b) => b.gaez!.suitability - a.gaez!.suitability)
+            .slice(0, FALLBACK_COUNT)
+        return { shown: best, fallback: true }
+    }, [all])
 
     const filtered = useMemo(() => {
         const words = deferredQuery.toLowerCase().split(/\s+/).filter(Boolean)
@@ -109,8 +115,7 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
             .sort(SORTERS[sort])
     }, [shown, deferredQuery, sort])
 
-    const ready =
-        view === "suited" ? gaez !== null : gaez !== null || soil !== null
+    const ready = gaez !== null
 
     const scrollerRef = useRef<HTMLDivElement>(null)
     const scroller = useSmoothHorizontalScroll(scrollerRef, [ready])
@@ -142,7 +147,7 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
     }, [ready])
 
     const { reset } = scroller
-    useEffect(() => reset(), [deferredQuery, sort, view, reset])
+    useEffect(() => reset(), [deferredQuery, sort, reset])
 
     const scrollPage = (direction: 1 | -1) => {
         const width = scrollerRef.current?.clientWidth ?? 0
@@ -180,22 +185,7 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
                     ← Back to map
                 </Link>
                 <h1>Select crops</h1>
-                <span
-                    className="crops-info"
-                    tabIndex={0}
-                    title={
-                        "Suitability: FAO GAEZ v4 rating for rainfed farming " +
-                        `(1981–2010 climate, high input level; ${cells}). ` +
-                        `"Suited to this area" lists crops rated at least ` +
-                        `medium (${MIN_SUITABILITY} / 100).\n\n` +
-                        "Soil health (0–100): nitrogen, organic matter, " +
-                        "ground cover and break-crop value add to it; " +
-                        "disturbance and harvest removal take away. Hover a " +
-                        "row on a card for details."
-                    }
-                >
-                    How scores work
-                </span>
+                <ScoreInfo cells={cells} />
                 <p className="crops-area">
                     Area: {describeSelection(selection)}
                 </p>
@@ -211,26 +201,6 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
             )}
 
             <div className="crops-toolbar">
-                <div className="crops-view" role="tablist">
-                    <button
-                        type="button"
-                        role="tab"
-                        aria-selected={view === "suited"}
-                        className={view === "suited" ? "active" : undefined}
-                        onClick={() => setView("suited")}
-                    >
-                        Suited to this area
-                    </button>
-                    <button
-                        type="button"
-                        role="tab"
-                        aria-selected={view === "all"}
-                        className={view === "all" ? "active" : undefined}
-                        onClick={() => setView("all")}
-                    >
-                        All crops
-                    </button>
-                </div>
                 <input
                     type="search"
                     className="crops-search"
@@ -277,27 +247,18 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
                 </span>
             </div>
 
-            {selectedCrops.length > 0 && (
-                <div className="crops-selected">
-                    {selectedCrops.map((id) => (
-                        <button
-                            key={id}
-                            type="button"
-                            className="crops-chip"
-                            onClick={() => toggle(id)}
-                            aria-label={`Remove ${byId.get(id)?.name ?? id}`}
-                        >
-                            {byId.get(id)?.name ?? id}
-                            <span aria-hidden="true">×</span>
-                        </button>
-                    ))}
-                </div>
-            )}
-
             {!ready && !gaezError && (
                 <p className="crops-loading">
                     Checking which crops suit this area… a new area takes up to
                     ~10 s.
+                </p>
+            )}
+            {ready && fallback && (
+                <p className="crops-fallback">
+                    No crop is rated medium ({MIN_SUITABILITY} / 100) or better
+                    for this area, so the {shown.length} best-rated crops are
+                    shown. Expect lower yields than the suitability scale
+                    suggests for a good site.
                 </p>
             )}
             {ready && filtered.length === 0 && (
@@ -331,7 +292,23 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
             )}
 
             <div className="crops-footer">
-                <p className="crops-count">{selectedCrops.length} selected</p>
+                <div className="crops-selected">
+                    <span className="crops-count">
+                        {selectedCrops.length} selected
+                    </span>
+                    {selectedCrops.map((id) => (
+                        <button
+                            key={id}
+                            type="button"
+                            className="crops-chip"
+                            onClick={() => toggle(id)}
+                            aria-label={`Remove ${byId.get(id)?.name ?? id}`}
+                        >
+                            {byId.get(id)?.name ?? id}
+                            <span aria-hidden="true">×</span>
+                        </button>
+                    ))}
+                </div>
                 {selectedCrops.length > 0 ? (
                     <Link to="/strategy" className="crops-next">
                         Build strategies →

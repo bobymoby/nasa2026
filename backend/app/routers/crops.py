@@ -12,6 +12,7 @@ from app.services.crop_suitability import (
     suitable_crops,
     texture_class,
 )
+from app.services.rotation_risks import ALIASES as ROTATION_ALIASES
 from app.services.rotation_risks import CROPS as ROTATION_CROPS
 from app.services.rotation_risks import rotation_risks
 
@@ -276,6 +277,8 @@ class RotationResponse(CamelModel):
         "disease-buildup risks the sequence makes worse. Only medium and high risks "
         "are listed; an empty list means none. Known crops: "
         + ", ".join(sorted(ROTATION_CROPS))
+        + "; also accepted: "
+        + ", ".join(sorted(ROTATION_ALIASES))
         + "."
     ),
 )
