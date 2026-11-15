@@ -178,6 +178,8 @@ class CropRoles(CamelModel):
 
 class Evaluation(CamelModel):
     profit_eur_ha: float
+    years: int = Field(description="Calendar years the rotation spans")
+    idle_months: int = Field(description="Months in those years with nothing growing")
     soil_benefit_score: float
     risk_score: float
     water_demand_mm: int | None
@@ -453,12 +455,8 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
             f"Unknown selected crop id(s): {', '.join(sorted(unknown_crops))}. "
             f"Supported crop IDs: {supported_ids}.",
         )
-    # one slot more than the selection, so each strategy can add a crop of its own
-    effective_years = (
-        min(svc.MAX_ROTATION_YEARS, max(request.years, len(crop_ids) + 1))
-        if len(crop_ids) < svc.MAX_ROTATION_YEARS
-        else len(crop_ids)
-    )
+    # plantings per rotation: one more than the selection, so a strategy can add a goal crop
+    effective_years = min(svc.MAX_ROTATION_YEARS, max(request.years, len(crop_ids) + 1))
     baseline_source = territory["baseline_rotation"]
     territory["baseline_rotation"] = [
         baseline_source[index % len(baseline_source)]
@@ -506,10 +504,12 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
             "Risk is the year-to-year variability of national yields (around their trend) and real prices; "
             "it does not cover pests, hail or local conditions.",
             "Erosion risk is a proxy from the humus balance; soil loss is not modeled.",
-            "Every strategy includes all selected crops and may add crops chosen for its own goal.",
+            "Your crops are options: a strategy may use any of them, any number of times (one crop "
+            "every season included), and may add one planting of a crop chosen for its own goal.",
             "Soil-building, risk-balanced and balanced plans fill idle windows between harvests with cover crops.",
-            "Rotations run one year longer than the number of selected crops (at most 5 years), "
-            "leaving room for a goal-specific crop.",
+            f"Rotations have one planting more than the number of selected crops (at most "
+            f"{svc.MAX_ROTATION_YEARS}); every combination is packed into its tightest order and each "
+            "strategy takes the best one for its own goal.",
             "Every strategy is compared with a baseline: "
             + (
                 "the rotation you supplied."

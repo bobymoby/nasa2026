@@ -26,12 +26,6 @@ $controls-height: 60px; // clears the .map-controls row
             100% - #{$controls-height + $soil-profile-bottom + $soil-profile-height + $gap}
         );
     }
-
-    // NdviDebug also styles .ndvi-legend as a flex row; this one is a bar
-    .ndvi-legend {
-        display: block;
-        margin: 0;
-    }
 }
 
 .sentinel-header {

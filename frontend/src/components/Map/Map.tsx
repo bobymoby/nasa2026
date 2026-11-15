@@ -12,7 +12,6 @@ import mapboxgl, {
 import "mapbox-gl/dist/mapbox-gl.css"
 
 import LocationSearch, { SearchResult } from "../LocationSearch/LocationSearch"
-import NdviDebug from "../NdviDebug/NdviDebug"
 import SentinelPanel from "../SentinelPanel/SentinelPanel"
 import { INITIAL_VIEW_STATE, MAPBOX_ACCESS_TOKEN, STYLES } from "./mapConfig"
 import SoilLegend from "../SoilLegend/SoilLegend"
@@ -244,7 +243,6 @@ function Map({
     const [soilOpacity, setSoilOpacity] = useState(0.4)
     const soilOpacityRef = useRef(soilOpacity)
     soilOpacityRef.current = soilOpacity
-    const [showNdvi, setShowNdvi] = useState(false)
 
     // style.load handlers need the latest selection without re-subscribing
     const selectionRef = useRef<Bounds | null>(null)
@@ -744,14 +742,6 @@ function Map({
                                 <span className="fields-actions">
                                     <button
                                         type="button"
-                                        className={`panel-toggle${showNdvi ? " active" : ""}`}
-                                        title="Send the selected field rings to /api/fields/ndvi"
-                                        onClick={() => setShowNdvi((s) => !s)}
-                                    >
-                                        NDVI debug
-                                    </button>
-                                    <button
-                                        type="button"
                                         className="panel-toggle"
                                         onClick={() =>
                                             onSelectedFieldsChange([])
@@ -891,13 +881,6 @@ function Map({
                 <SentinelPanel fields={selectedFields} />
             )}
             {selection && <SoilProfile selection={selection} />}
-            {showNdvi && selectedFields.length > 0 && (
-                <NdviDebug
-                    fields={selectedFields}
-                    fieldLabel={fieldLabel}
-                    onClose={() => setShowNdvi(false)}
-                />
-            )}
             <div id="map-container" ref={mapContainerRef} />
         </div>
     )
