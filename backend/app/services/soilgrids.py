@@ -209,3 +209,20 @@ def get_soil_physical(rect: Rect) -> dict[str, Any]:
             "a measurement of effective soil depth."
         ),
     }
+
+
+TOPSOIL_DEPTHS = {"0-5cm": 5, "5-15cm": 10, "15-30cm": 15}
+TOPSOIL_PROPERTIES = {"sand": "%", "clay": "%", "soc": "g/kg"}
+
+
+def topsoil(lat: float, lng: float) -> dict[str, float] | None:
+    """Depth-weighted 0-30 cm sand %, clay % and organic carbon g/kg at a point; None where SoilGrids has no soil."""
+    layers = _cached_properties(round(lat, 4), round(lng, 4), tuple(TOPSOIL_PROPERTIES))
+    out = {}
+    for name, unit in TOPSOIL_PROPERTIES.items():
+        by_depth = _property_values(layers, name, unit)["values_by_depth"]
+        pairs = [(by_depth[d], w) for d, w in TOPSOIL_DEPTHS.items() if by_depth.get(d) is not None]
+        if not pairs:
+            return None
+        out[name] = round(sum(v * w for v, w in pairs) / sum(w for _, w in pairs), 2)
+    return out

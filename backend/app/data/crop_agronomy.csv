@@ -1,0 +1,32 @@
+crop_id,name,role,family,min_return_years,sow_start,sow_end,harvest_start,harvest_end,kc_ini,kc_mid,kc_end,l_ini,l_dev,l_mid,l_late,p,ky,root_depth_m,n_fix_kg_ha,n_demand_kg_t,humus_ceq,drought_tolerance,forage
+wheat,Winter wheat,cash,Poaceae,2,10-05,10-25,06-28,07-15,0.70,1.15,0.25,137,61,40,25,0.55,1.00,1.5,0,25,-280,medium,false
+barley,Winter barley,cash,Poaceae,2,10-01,10-20,06-15,06-30,0.70,1.15,0.25,140,50,40,25,0.55,1.00,1.2,0,22,-280,medium,false
+rye,Winter rye,cash,Poaceae,2,09-25,10-15,07-01,07-15,0.70,1.15,0.25,140,65,40,31,0.55,1.00,1.5,0,20,-280,high,false
+oat,Spring oat,cash,Poaceae,4,03-01,03-25,07-10,07-31,0.30,1.15,0.25,20,25,60,30,0.55,1.00,1.2,0,22,-280,low,false
+maize,Maize (grain),cash,Poaceae,2,04-10,05-05,09-15,10-31,0.30,1.20,0.35,30,40,50,40,0.55,1.25,1.3,0,22,-280,low,false
+sorghum,Sorghum (grain),cash,Poaceae,2,05-01,05-20,09-01,10-15,0.30,1.05,0.55,20,35,40,30,0.55,0.90,1.5,0,22,-280,high,false
+buckwheat,Buckwheat,cash,Polygonaceae,2,04-25,05-20,08-01,08-31,0.30,1.00,0.30,15,25,35,20,0.50,1.00,0.8,0,30,-280,low,false
+foxtail_millet,Foxtail millet,cash,Poaceae,2,05-01,05-25,08-15,09-15,0.30,1.00,0.30,15,25,40,25,0.55,0.90,1.0,0,25,-280,high,false
+sunflower,Sunflower,cash,Asteraceae,5,04-01,04-25,08-20,09-30,0.35,1.05,0.35,25,35,45,25,0.45,0.95,1.5,0,40,-280,high,false
+rapeseed,Winter rapeseed,cash,Brassicaceae,4,08-25,09-15,06-20,07-05,0.70,1.05,0.35,180,45,40,29,0.60,1.00,1.2,0,50,-280,medium,false
+soybean,Soybean,cash,Fabaceae,3,04-20,05-15,09-05,10-10,0.40,1.15,0.50,20,30,60,25,0.50,0.85,1.0,120,80,160,low,false
+flax,Flax (oilseed),cash,Linaceae,6,03-10,04-05,07-10,08-10,0.35,1.10,0.25,20,30,40,30,0.50,1.00,1.2,0,45,-280,medium,false
+dry_pea,Dry pea,cash,Fabaceae,5,02-25,03-20,06-15,07-10,0.50,1.15,0.30,20,30,40,15,0.40,1.15,0.8,80,50,160,medium,false
+chickpea,Chickpea,cash,Fabaceae,4,03-01,03-31,06-25,07-25,0.40,1.00,0.35,20,30,40,20,0.50,1.00,0.8,60,55,160,high,false
+phaseolus_bean,Common bean,cash,Fabaceae,3,04-25,05-20,08-15,09-15,0.40,1.15,0.35,20,30,40,20,0.45,1.15,0.75,40,60,160,low,false
+sugarbeet,Sugar beet,cash,Amaranthaceae,4,03-15,04-10,09-15,10-31,0.35,1.20,0.70,50,40,50,40,0.55,1.00,1.0,0,4,-760,medium,false
+white_potato,Potato,cash,Solanaceae,4,03-25,04-20,08-01,09-15,0.50,1.15,0.75,25,30,45,30,0.35,1.10,0.5,0,5,-760,low,false
+tobacco,Tobacco (oriental),cash,Solanaceae,3,05-01,05-25,08-25,09-30,0.50,1.10,0.80,20,30,40,30,0.50,0.90,0.8,0,35,-560,medium,false
+alfalfa,Alfalfa,forage,Fabaceae,5,03-15,04-15,05-15,10-31,0.40,0.95,0.90,10,30,150,20,0.55,1.10,1.5,200,27,600,high,true
+cotton,Cotton,cash,Malvaceae,2,04-20,05-10,09-15,10-31,0.35,1.15,0.60,30,50,50,30,0.65,0.85,1.3,0,45,-280,high,false
+cabbage,Cabbage,cash,Brassicaceae,4,04-01,05-01,08-15,10-31,0.70,1.05,0.95,40,60,50,15,0.45,0.95,0.6,0,3.5,-760,low,false
+carrot,Carrot,cash,Apiaceae,4,03-15,04-15,08-01,10-15,0.70,1.05,0.95,30,40,60,20,0.35,1.00,0.7,0,2.5,-280,low,false
+onion,Onion (dry),cash,Amaryllidaceae,4,03-01,03-31,07-25,09-10,0.70,1.05,0.75,15,25,70,40,0.30,1.10,0.4,0,3,-280,low,false
+tomato,Tomato,cash,Solanaceae,4,04-25,05-20,07-25,10-15,0.60,1.15,0.80,30,40,45,30,0.40,1.05,1.0,0,2.5,-760,low,false
+vetch_oats,Vetch + oats,cover,Fabaceae+Poaceae,3,08-25,09-25,03-10,04-10,0.70,1.00,0.95,130,40,15,12,0.50,1.00,0.8,80,30,120,medium,true
+pea_oats,Field pea + oats,cover,Fabaceae+Poaceae,3,08-01,08-31,11-01,11-30,0.40,1.05,0.95,15,30,30,16,0.45,1.00,0.7,60,28,80,low,true
+clover_radish,Crimson clover + radish,cover,Fabaceae+Brassicaceae,3,08-01,08-31,11-01,11-30,0.40,1.00,0.95,15,30,30,16,0.50,1.00,0.9,60,30,80,medium,false
+phacelia,Phacelia,cover,Boraginaceae,1,08-01,08-31,11-01,11-30,0.40,1.00,0.90,15,25,35,16,0.50,1.00,0.8,0,25,80,medium,false
+mustard,White mustard,cover,Brassicaceae,3,08-01,08-31,11-01,11-30,0.35,1.00,0.90,10,25,40,16,0.60,1.00,1.0,0,25,80,medium,false
+cereal_rye,Cereal rye,cover,Poaceae,1,09-25,10-20,04-01,04-30,0.70,1.10,1.00,140,30,15,5,0.55,1.00,1.0,0,20,120,high,true
+crimson_clover,Crimson clover,cover,Fabaceae,3,08-20,09-20,04-15,05-15,0.70,1.00,0.95,150,50,25,13,0.50,1.00,0.7,90,30,120,low,true

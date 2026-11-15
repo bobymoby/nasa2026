@@ -6,8 +6,6 @@ record of a single field on click.
 """
 
 import contextvars
-import hashlib
-import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -27,6 +25,8 @@ from app.routers.crops import SelectedField
 from app.routers.sentinel import Client
 from app.services.field_ndvi import (
     S2_FIRST_YEAR,
+    cache_key,
+    plot_cache_key,
     Params,
     analyse,
     fetch_observations,
@@ -34,7 +34,7 @@ from app.services.field_ndvi import (
     shrink,
     shrink_polygon,
 )
-from app.services import gaez
+from app.services import gaez, site_context
 from app.services.sentinel_hub import SentinelHub, SentinelHubError
 from app.timing import emit, plot_tag, timed
 
@@ -205,20 +205,6 @@ class PlotsRequest(NdviOptions, PlotsInput):
     """POST /ndvi body: the plots plus the NDVI options."""
 
 
-def _cache_key(kind: str, ident: str, buffer_m: float) -> str:
-    # the buffer changes which pixels are read, so it is part of the key
-    return f"{kind}:{ident}:b{buffer_m:g}"
-
-
-def _plot_key(plot_id: str | None, points: list[tuple[float, float]], buffer_m: float) -> str:
-    """Field id when given (stable across requests), else a hash of the outline."""
-    if plot_id is not None:
-        return _cache_key("field", plot_id, buffer_m)
-    rounded = [[round(lat, 7), round(lon, 7)] for lat, lon in points]
-    digest = hashlib.sha256(json.dumps(rounded).encode()).hexdigest()[:24]
-    return _cache_key("outline", digest, buffer_m)
-
-
 def _evaluate(
     sh: SentinelHub, inner: Rect | Polygon, years: list[int], opts: NdviOptions, cache_key: str
 ) -> dict:
@@ -267,7 +253,7 @@ def field_ndvi(sh: Client, rect: RectQuery, opts: Annotated[NdviOptions, Query()
         inner = shrink(rect, opts.buffer_m)
     except ValueError as e:
         raise HTTPException(422, str(e))
-    key = _cache_key("rect", ",".join(f"{v:.7f}" for v in rect.bbox), opts.buffer_m)
+    key = cache_key("rect", ",".join(f"{v:.7f}" for v in rect.bbox), opts.buffer_m)
     with timed("GET /fields/ndvi", logging.INFO, years=f"{years[0]}-{years[-1]}"):
         return _evaluate(sh, inner, years, opts, key)
 
@@ -290,7 +276,7 @@ def plots_ndvi(sh: Client, req: PlotsRequest) -> list[dict]:
         try:
             with timed("outline + inward buffer", points=len(points)):
                 inner = shrink_polygon(plot_polygon(points), req.buffer_m)
-            key = _plot_key(plot_id, points, req.buffer_m)
+            key = plot_cache_key(plot_id, points, req.buffer_m)
             return {**head, **_evaluate(sh, inner, years, req, key)}
         except ValueError as e:
             return {**head, "periods": [], "error": str(e)}
@@ -321,7 +307,7 @@ def plots_ndvi_prefetch(sh: Client, req: PlotsRequest) -> dict:
         try:
             inner = shrink_polygon(plot_polygon(points), req.buffer_m)
             with timed(f"prefetch {len(years)} years", logging.INFO):
-                fetch_observations(sh, inner, years, _plot_key(plot_id, points, req.buffer_m))
+                fetch_observations(sh, inner, years, plot_cache_key(plot_id, points, req.buffer_m))
         except Exception as e:  # nobody is waiting on this; just log it
             log.warning("prefetch of %s failed: %s", plot_id or "outline", e)
 
@@ -400,6 +386,21 @@ def plots_suitability(req: SuitabilityRequest) -> list[dict]:
 def plots_suitability_prefetch(req: SuitabilityRequest) -> dict:
     _, cells = _plot_cells(req)
     return {"tiles_queued": gaez.prefetch(req.input_level, {c for _, c in cells})}
+
+
+@router.post("/strategy-context", summary="Site inputs for rotation strategies: country, climate, soil, slope, history, suitability, prices")
+def strategy_context(sh: Client, req: PlotsInput) -> dict:
+    return site_context.site_context(sh, req.outlines())
+
+
+@router.post(
+    "/strategy-context/prefetch",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Warm the site inputs for these plots in the background; returns immediately",
+)
+def strategy_context_prefetch(sh: Client, req: PlotsInput) -> dict:
+    site_context.prefetch(sh, req.outlines())
+    return {"queued": len(req.outlines())}
 
 
 @router.get("/{field_id}", summary="One field as a GeoJSON feature (WGS84)")

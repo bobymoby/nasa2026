@@ -63,6 +63,7 @@ DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose up -d db
   - `app/cache.py` provides `cached_json(namespace, key, fetch)`. It stores generic upstream responses in the `json_cache` table.
   - `services/ndvi_cache.py` stores per-year NDVI observations in `ndvi_year_cache`, keyed by field id or outline hash plus the inward buffer. Finished years are kept forever; the current year expires after 1 day. Concurrent fetches of the same plot and year are deduplicated.
   - `services/gaez.py` reads FAO's GeoTIFFs with rasterio and stores 1° tiles (`gaez_tile`, `gaez_tile_fetch`, `gaez_tile_value`, plus `gaez_crop`, `gaez_layer`). A missing tile loads its whole 10° region. Nothing is cached per plot.
+  - `services/site_context.py` stores static per-plot inputs (topsoil, available water, RUSLE K, slope) in `plot_site`, keyed like the NDVI cache; everything else in the context is derived from the caches above. Country comes from `services/country.py` (bundled Natural Earth borders).
   - Tables are created lazily with `ensure_table` in `app/db.py`.
   - Every cache must degrade gracefully: if the database is down, the request still succeeds, uncached.
 - **Field parcels.** Field outlines come from the PostGIS table `bulgaria_data` (EPSG:3035). The map loads them as vector tiles (`/fields/tiles/...`) and fetches one full field on click.

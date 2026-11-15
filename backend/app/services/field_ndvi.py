@@ -13,6 +13,8 @@
 """
 
 import contextvars
+import hashlib
+import json
 import math
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
@@ -178,6 +180,18 @@ def shrink_polygon(poly: Polygon, buffer_m: float) -> Polygon:
 def area_m2(poly: Polygon) -> float:
     to_m, _ = _metric(poly.centroid.y)
     return transform(to_m, poly).area
+
+
+def cache_key(kind: str, ident: str, buffer_m: float) -> str:
+    return f"{kind}:{ident}:b{buffer_m:g}"
+
+
+def plot_cache_key(plot_id: str | None, points: list[tuple[float, float]], buffer_m: float) -> str:
+    """Field id when given (stable across requests), else a hash of the outline."""
+    if plot_id is not None:
+        return cache_key("field", plot_id, buffer_m)
+    rounded = [[round(lat, 7), round(lon, 7)] for lat, lon in points]
+    return cache_key("outline", hashlib.sha256(json.dumps(rounded).encode()).hexdigest()[:24], buffer_m)
 
 
 def _stat(item: dict, output: str) -> dict:

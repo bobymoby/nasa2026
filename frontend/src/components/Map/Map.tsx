@@ -27,6 +27,7 @@ import {
 } from "../../api/fetchField"
 import { prefetchFieldNdvi } from "../../api/fetchFieldNdvi"
 import { prefetchSuitability } from "../../api/fetchCrops"
+import { prefetchSiteContext } from "../../api/fetchSiteContext"
 
 const SELECTION_SOURCE_ID = "selection"
 const FIELDS_SOURCE_ID = "fields"
@@ -582,6 +583,7 @@ function Map({
                         latest.map((f) => (f.id === field.id ? field : f)),
                     )
                     prefetchFieldNdvi([field])
+                    prefetchSiteContext([field])
                 })
                 .catch((err) =>
                     setFieldError(
