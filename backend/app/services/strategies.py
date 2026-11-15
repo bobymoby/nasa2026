@@ -15,16 +15,20 @@ Crop profiles are built per request from sourced data:
 A value whose source is unavailable is None and scores neutral; it is never
 filled in by hand.
 
-Every strategy keeps the farmer's crops and may add crops from the catalog
-that suit its goal (`_extra_crops`); the soil- and risk-minded ones fill idle
-windows between harvests with cover crops (`COVER_POLICIES`). Picking a
-rotation also penalises similarity to the strategies already chosen.
+The farmer's crops are options: a strategy may use any of them, any number of
+times (one crop every season included), plus one planting of a catalog crop
+that suits its goal (`_extra_crops`). Every combination is packed into its tightest
+order, fewest calendar years and idle months (`_packer`). Each strategy then
+takes, greedily, the packed rotation that is best on its own measure
+(`GOALS`), skipping crop combinations another strategy took; the soil- and
+risk-minded ones fill the remaining idle windows with cover crops
+(`COVER_POLICIES`).
 """
 
 import math
 from dataclasses import dataclass
 from functools import cache
-from itertools import islice, permutations, product
+from itertools import combinations_with_replacement
 from typing import Any
 
 from app.services import agronomy, cap_payments, drought
@@ -141,11 +145,11 @@ STRATEGY_NAMES = {
         "Planned rotation",
         "The rotation you plan to grow; it is the baseline the other strategies are compared with.",
     ),
-    "profit_first": ("Profit-focused", "Prioritizes estimated rotation profit."),
-    "soil_builder": ("Soil-building", "Prioritizes the humus balance: legumes and cover crops."),
-    "risk_balanced": ("Risk-balanced", "Favors crops whose national yields and prices vary least."),
-    "water_efficient": ("Water-efficient", "Favors lower water demand and profit per water unit."),
-    "balanced": ("Balanced", "Balances profit, soil benefit, risk, water efficiency, and feasibility."),
+    "profit_first": ("Profit-focused", "The highest estimated profit per hectare per year."),
+    "soil_builder": ("Soil-building", "The best humus balance: legumes and cover crops."),
+    "risk_balanced": ("Risk-balanced", "The crops whose national yields and prices vary least."),
+    "water_efficient": ("Water-efficient", "The most profit per mm of crop water demand."),
+    "balanced": ("Balanced", "The best equal-weight mix of profit, soil, risk, water and feasibility."),
 }
 EXTRA_CROP_REASONS = {
     "profit_first": "the highest estimated profit among the remaining crops",
@@ -167,15 +171,34 @@ NO_COVER_REASONS = {
 DEFAULT_BASELINE = ("wheat", "sunflower", "barley", "chickpea", "rapeseed")
 MIN_SUITABILITY = 25.0
 MAX_FALLOW_MONTHS = 10
-MAX_ROTATIONS = 5000
-MAX_ROTATION_YEARS = 5
+# most plantings multisets packed per request; longer rotations are shortened to fit
+MAX_CANDIDATES = 20000
+MAX_ROTATION_YEARS = 7
 EXTRA_SHORTLIST = 3
 BREAK_CROP_BONUS = 5.0
 # share of an extra crop's score that comes from the strategy's leading goal alone
 GOAL_FOCUS = 0.7
-DIVERSITY_PENALTY = 60.0
 # cover crops are usually ended a few weeks before the next sowing
 COVER_EARLY_END_MONTHS = 1
+
+
+def _profit_per_year(m: dict[str, Any]) -> float:
+    return m["profit_eur_ha"] / m["years"]
+
+
+def _profit_per_mm(m: dict[str, Any]) -> float | None:
+    water = m["water_demand_mm"]
+    return None if water is None else m["profit_eur_ha"] / max(water, 1)
+
+
+# strategy -> (higher-is-better measure it is picked on, how to describe the winner);
+# a strategy without a goal, or whose measure is unknown, takes its weighted score
+GOALS: dict[str, tuple[Any, str]] = {
+    "profit_first": (_profit_per_year, "the highest estimated profit per hectare per year"),
+    "soil_builder": (lambda m: m["soil_benefit_score"], "the best humus balance"),
+    "risk_balanced": (lambda m: -m["risk_score"], "the steadiest national yields and prices"),
+    "water_efficient": (_profit_per_mm, "the most profit per mm of crop water demand"),
+}
 
 
 def crop_risk(yield_cv: float | None, price_cv: float | None) -> float | None:
@@ -384,83 +407,14 @@ def _cover_slot(cover: CropProfile, first_free: int, last_free: int) -> dict[str
     return slot
 
 
-def generate_valid_rotations(
-    territory: dict[str, Any],
-    crops: list[CropProfile | str | dict[str, Any]],
-    years: int = 3,
-    required_crop_ids: list[str] | None = None,
-    require_additional_crop: bool = False,
-) -> list[dict[str, Any]]:
-    """Enumerate season-compatible crop sequences and score rotation gaps.
-
-    ``previously_planted`` is chronological, oldest to newest. A candidate
-    crop sequence has one crop event per requested position; calendar dates
-    are scheduled after the prior crop's harvest. When required crops are
-    supplied, every returned sequence includes all of them.
-    """
-    if years < 1:
-        raise ValueError("years must be at least 1")
-    candidates = [_crop_profile(crop, territory) for crop in crops]
-    available = _available(candidates, territory)
-    if not available:
-        return []
-
-    required_ids = set(required_crop_ids or ())
-    available_by_id = {crop.id: crop for crop in available}
-    if not required_ids.issubset(available_by_id):
-        return []
-    if len(required_ids) > years:
-        raise ValueError("years must be at least the number of required crops")
-
-    history = list(territory.get("previously_planted", ()))
-    rotations = []
-    if required_crop_ids is None:
-        sequences = product(available, repeat=years)
-    elif years <= MAX_ROTATION_YEARS:
-        sequences = (
-            sequence for sequence in product(available, repeat=years)
-            if required_ids.issubset(crop.id for crop in sequence)
-            and (
-                not require_additional_crop
-                or any(crop.id not in required_ids for crop in sequence)
-            )
-        )
-    elif require_additional_crop and years == len(required_ids) + 1:
-        required_crops = [available_by_id[crop_id] for crop_id in required_crop_ids]
-        optional_crops = [
-            crop for crop in available if crop.id not in required_ids
-        ]
-        sequences = (
-            sequence
-            for optional in optional_crops
-            for sequence in islice(
-                permutations([*required_crops, optional]),
-                MAX_ROTATIONS,
-            )
-        )
-    else:
-        required_crops = [available_by_id[crop_id] for crop_id in required_crop_ids]
-        sequences = islice(permutations(required_crops), MAX_ROTATIONS)
-
-    for sequence in sequences:
-        if required_crop_ids is not None and not required_ids.issubset(
-            crop.id for crop in sequence
-        ):
-            continue
-        if require_additional_crop and not any(
-            crop.id not in required_ids for crop in sequence
-        ):
-            continue
-        sequence = tuple(sequence)
-        schedule = _schedule(sequence)
-        if schedule is None:
-            continue
-        rotations.append({
-            "crop_ids": [crop.id for crop in sequence],
-            "schedule": schedule,
-            "rotation_constraint_penalty": _rotation_constraint_penalty(sequence, history, territory),
-        })
-    return rotations
+def _pack(schedule: list[dict[str, Any]]) -> tuple[int, int]:
+    """Calendar years the schedule spans and the months in them nothing grows."""
+    years = max(item["end"][0] for item in schedule)
+    growing = len({
+        month for item in schedule
+        for month in range(item["sow_index"], item["harvest_index"] + 1)
+    })
+    return years, years * 12 - growing
 
 
 def _linear_score(value: float, low: float, high: float) -> float:
@@ -481,7 +435,7 @@ def _metrics(rotation: dict[str, Any], territory: dict[str, Any]) -> dict[str, A
         len(preferred.intersection(crop.id for crop in crops)) / len(preferred)
         if preferred else 1.0
     )
-    years = max(item["end"][0] for item in rotation["schedule"])
+    years, idle = _pack(rotation["schedule"])
     profit = (
         sum(_crop_profit(crop, territory) for crop in crops)
         - sum(_cover_cost(crop.id) - territory.get("cover_payment_eur_ha", 0.0) for crop in covers)
@@ -503,6 +457,8 @@ def _metrics(rotation: dict[str, Any], territory: dict[str, Any]) -> dict[str, A
     )
     return {
         "profit_eur_ha": round(profit, 2),
+        "years": years,
+        "idle_months": idle,
         "soil_benefit_score": round(soil_benefit, 2),
         "risk_score": round(risk, 2),
         "water_demand_mm": water,
@@ -865,13 +821,6 @@ def _score_candidates(
     return candidates
 
 
-def _similarity(a: list[str], b: list[str]) -> float:
-    """0 = no crop in common, 1 = the same crops in the same order."""
-    shared = len(set(a) & set(b)) / len(set(a) | set(b))
-    same_position = sum(x == y for x, y in zip(a, b)) / max(len(a), len(b))
-    return 0.7 * shared + 0.3 * same_position
-
-
 def _cover_explanation(strategy_type: str, planted: list[CropProfile]) -> str:
     covers = [crop.name for crop in planted if _is_cover(crop)]
     if covers:
@@ -897,15 +846,23 @@ def _rank(
         if not rotations:
             continue
         candidates = _score_candidates(rotations, territory, strategy_type, weights)
+        measure, goal_text = GOALS.get(strategy_type, (None, "the best weighted score"))
+        if measure is not None and any(measure(c["metrics"]) is None for c in candidates):
+            measure, goal_text = None, "the best weighted score (its own measure needs data that is missing here)"
 
-        def adjusted(candidate: dict[str, Any]) -> float:
-            ids = candidate["rotation"]["crop_ids"]
-            closest = max((_similarity(ids, other) for other in picked), default=0.0)
-            return candidate["score"] - DIVERSITY_PENALTY * closest
+        def greed(candidate: dict[str, Any]) -> tuple:
+            m = candidate["metrics"]
+            goal = measure(m) if measure is not None else candidate["score"]
+            return (
+                -goal, -candidate["score"], m["years"], m["idle_months"],
+                tuple(candidate["rotation"]["crop_ids"]),
+            )
 
-        best = min(
-            candidates,
-            key=lambda c: (-adjusted(c), tuple(c["rotation"]["crop_ids"])),
+        ordered = sorted(candidates, key=greed)
+        taken_sets = {tuple(sorted(ids)) for ids in picked}
+        best = next(
+            (c for c in ordered if tuple(sorted(c["rotation"]["crop_ids"])) not in taken_sets),
+            next((c for c in ordered if c["rotation"]["crop_ids"] not in picked), ordered[0]),
         )
         rotation, metrics = best["rotation"], best["metrics"]
         crop_ids = rotation["crop_ids"]
@@ -919,16 +876,27 @@ def _rank(
             rotation, metrics, strategy_type, len(strategies) + 1, best["score"],
             sorted(preferred.intersection(crop_ids)), added, baseline_metrics, territory,
         )
-        explanations = [f"Selected using the {strategy_type.replace('_', ' ')} weighted scoring profile."]
+        explanations = [
+            f"Of {len(candidates)} rotations, each packed into its tightest order, this one has "
+            + goal_text
+            + f"; it fills {metrics['years']} calendar year(s) with {metrics['idle_months']} idle month(s)."
+        ]
         if added:
             names = ", ".join(profiles(territory)[c].name for c in added)
             explanations.append(f"Adds {names} to your crops for {EXTRA_CROP_REASONS[strategy_type]}.")
+        left_out = [c for c in dict.fromkeys(selected_ids or ()) if c not in crop_ids]
+        if left_out:
+            names = ", ".join(profiles(territory)[c].name for c in left_out)
+            explanations.append(f"Leaves out {names}: rotations without them scored better on this goal.")
         explanations.append(_cover_explanation(strategy_type, [item["crop"] for item in rotation["schedule"]]))
         strategy["explanations"][:0] = explanations
+        if tuple(sorted(crop_ids)) in taken_sets and not reused_rotation:
+            strategy["explanations"].append(
+                "Every crop set it could use was taken by another strategy, so it reorders one."
+            )
         if reused_rotation:
             strategy["explanations"].append(
-                "no distinct sequence remained for this strategy type; the highest-scoring "
-                "available sequence is reused."
+                "No sequence was left that another strategy had not taken, so its best one is reused."
             )
         strategy["evaluation"]["score_components"] = {
             _camel_key(key): value for key, value in best["components"].items()
@@ -953,43 +921,100 @@ def rank_rotation_strategies(
     return _rank({name: rotations for name in types}, territory)
 
 
+def _packer(pool: list[CropProfile]):
+    """The tightest order of any multiset of pool crops, crops repeating as often as they appear.
+
+    A crop is sown in its first sowing month after the previous harvest, so the
+    months a rotation takes depend only on which crop follows which. Searched
+    over (crops still to place, last crop placed), shared by every multiset.
+    """
+    durations = [crop.duration_months for crop in pool]
+    gap = [
+        [(after.sow_month - 1 - before.harvest_month) % 12 for after in pool]
+        for before in pool
+    ]
+
+    @cache
+    def rest(remaining: tuple[int, ...], last: int) -> tuple[float, tuple[int, ...]]:
+        if not any(remaining):
+            return 0, ()
+        best: tuple[float, tuple[int, ...]] = (math.inf, ())
+        for nxt, count in enumerate(remaining):
+            if not count or gap[last][nxt] > MAX_FALLOW_MONTHS:
+                continue
+            left = remaining[:nxt] + (count - 1,) + remaining[nxt + 1:]
+            months, order = rest(left, nxt)
+            best = min(best, (gap[last][nxt] + durations[nxt] + months, (nxt, *order)))
+        return best
+
+    def pack(counts: tuple[int, ...]) -> tuple[CropProfile, ...] | None:
+        best: tuple[float, tuple[int, ...]] = (math.inf, ())
+        for first, count in enumerate(counts):
+            if not count:
+                continue
+            left = counts[:first] + (count - 1,) + counts[first + 1:]
+            months, order = rest(left, first)
+            best = min(best, (pool[first].sow_month - 1 + durations[first] + months, (first, *order)))
+        return None if best[0] == math.inf else tuple(pool[i] for i in best[1])
+
+    return pack
+
+
 def build_strategies(
     territory: dict[str, Any],
     selected_ids: list[str],
     years: int,
 ) -> tuple[list[dict[str, Any]], int]:
-    """One strategy per objective; each keeps every selected crop and, when the
-    rotation has room, adds crops from the catalog that suit its objective.
+    """One strategy per objective, each the best rotation for its measure.
 
-    Returns the strategies and how many distinct rotations were evaluated.
+    Candidates are every multiset of `years` plantings of the selected crops,
+    which may repeat (a single crop grown every season included), with at most
+    one planting of a crop the strategy adds for its goal (`_extra_crops`).
+    Each is packed into its tightest order. Returns the strategies and how
+    many candidates were packed.
     """
-    by_extras: dict[tuple[str, ...], list[dict[str, Any]]] = {}
-
-    def rotations_with(extras: list[CropProfile]) -> list[dict[str, Any]]:
-        key = tuple(crop.id for crop in extras)
-        if key not in by_extras:
-            rotations = []
-            if extras:
-                rotations = generate_valid_rotations(
-                    territory, [*selected_ids, *extras], years=years,
-                    required_crop_ids=selected_ids, require_additional_crop=True,
-                )
-            by_extras[key] = rotations or generate_valid_rotations(
-                territory, selected_ids, years=years, required_crop_ids=selected_ids,
-            )
-        return by_extras[key]
-
-    room = years > len(selected_ids)
-    rotations_by_type = {
-        name: rotations_with(_extra_crops(territory, selected_ids, weights) if room else [])
-        for name, weights in _profiles(territory, None).items()
+    catalog = profiles(territory)
+    weights_by_type = _profiles(territory, None)
+    own = _available([catalog[c] for c in dict.fromkeys(selected_ids)], territory)
+    if not own:
+        return [], 0
+    own_ids = {crop.id for crop in own}
+    extras_by_type = {
+        name: {crop.id for crop in _extra_crops(territory, selected_ids, weights)}
+        for name, weights in weights_by_type.items()
     }
-    evaluated = len({
-        tuple(rotation["crop_ids"])
-        for rotations in by_extras.values()
-        for rotation in rotations
-    })
-    return _rank(rotations_by_type, territory, selected_ids), evaluated
+    pool = [*own, *(catalog[c] for c in sorted(set().union(*extras_by_type.values()) - own_ids))]
+    length = years
+    while length > 1 and math.comb(len(pool) + length - 1, length) > MAX_CANDIDATES:
+        length -= 1
+
+    pack = _packer(pool)
+    history = list(territory.get("previously_planted", ()))
+    rotations = []
+    for multiset in combinations_with_replacement(range(len(pool)), length):
+        if sum(pool[i].id not in own_ids for i in multiset) > 1:
+            continue
+        sequence = pack(tuple(multiset.count(i) for i in range(len(pool))))
+        if sequence is None:
+            continue
+        schedule = _schedule(sequence)
+        years_used, idle = _pack(schedule)
+        rotations.append({
+            "crop_ids": [crop.id for crop in sequence],
+            "schedule": schedule,
+            "years": years_used,
+            "idle_months": idle,
+            "rotation_constraint_penalty": _rotation_constraint_penalty(sequence, history, territory),
+        })
+
+    rotations_by_type = {
+        name: [
+            r for r in rotations
+            if all(c in own_ids or c in extras_by_type[name] for c in r["crop_ids"])
+        ]
+        for name in weights_by_type
+    }
+    return _rank(rotations_by_type, territory, selected_ids), len(rotations)
 
 
 def _camel_key(value: str) -> str:
