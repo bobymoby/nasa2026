@@ -6,6 +6,7 @@ estimate for Bulgarian conditions:
 - other operating costs (fertiliser, crop protection, machinery and fuel)
 - cover crops (seed + sowing and termination; no harvest)
 - alfalfa hay, which has no market figures
+Crops with neither fall back to the strategy generator's mock profile.
 
 Money is attributed to the harvest year; a forage ley is split per season.
 """
@@ -14,7 +15,7 @@ import logging
 import math
 from dataclasses import dataclass
 
-from app.services.strategies import Planting, Strategy
+from app.services.strategies import CROP_BY_ID
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ OPERATING_COSTS_EUR_HA = {
     "chickpea": 290.0,
     "alfalfa": 340.0,
 }
+PRICE_ALIASES = {"field_pea": "pea"}
 DEFAULT_OPERATING_COST_EUR_HA = 450.0
 
 # cover crops: (seed, sowing + termination) in €/ha
@@ -72,7 +74,8 @@ CROP_PRICES = {
 
 @dataclass(frozen=True)
 class PlantingEconomics:
-    planting: Planting
+    crop_name: str
+    role: str
     revenue: float
     seed_cost: float
     operating_cost: float
@@ -122,33 +125,43 @@ class StrategyEconomics:
         return [(r, c) for r, c in totals]
 
 
-def _planting_economics(p: Planting) -> PlantingEconomics:
-    start_year, end_year = p.start[0], p.end[0]
+def _planting_economics(p: dict) -> PlantingEconomics:
+    crop_id, role, name = p["crop_id"], p["role"], p["crop_name"]
+    start_year, end_year = p["start"]["year"], p["end"]["year"]
 
-    if p.role == "cover":
-        seed, ops = COVER_COSTS_EUR_HA.get(p.crop_id, DEFAULT_COVER_COST_EUR_HA)
-        return PlantingEconomics(p, 0.0, seed, ops, "no harvest", [(start_year, 0.0, seed + ops)])
-
-    price = CROP_PRICES.get(p.crop_id)
-    ops_per_season = OPERATING_COSTS_EUR_HA.get(p.crop_id, DEFAULT_OPERATING_COST_EUR_HA)
-    if price is None:
-        log.warning("no price for %s; counting costs only", p.crop_id)
+    if role == "cover":
+        seed, ops = COVER_COSTS_EUR_HA.get(crop_id, DEFAULT_COVER_COST_EUR_HA)
         return PlantingEconomics(
-            p, 0.0, 0.0, ops_per_season, "no price data", [(end_year, 0.0, ops_per_season)]
+            name, role, 0.0, seed, ops, "no harvest", [(start_year, 0.0, seed + ops)]
         )
 
+    price = CROP_PRICES.get(PRICE_ALIASES.get(crop_id, crop_id))
+    if price is None:
+        mock = CROP_BY_ID.get(crop_id)
+        if mock is None:
+            log.warning("no price for %s; counting costs only", crop_id)
+            ops = DEFAULT_OPERATING_COST_EUR_HA
+            return PlantingEconomics(
+                name, role, 0.0, 0.0, ops, "no price data", [(end_year, 0.0, ops)]
+            )
+        revenue, cost = mock.gross_revenue_eur_ha, mock.variable_cost_eur_ha
+        return PlantingEconomics(
+            name, role, revenue, 0.0, cost, "mock profile", [(end_year, revenue, cost)]
+        )
+
+    ops_per_season = OPERATING_COSTS_EUR_HA.get(crop_id, DEFAULT_OPERATING_COST_EUR_HA)
     source = f"market {price.year}" if price.year else "estimate"
     revenue_per_season = price.yield_t_ha * price.price_eur_t
 
-    if p.role == "forage":
-        # a ley is cut every year it stands
+    if role == "forage":
         seasons = list(range(start_year, end_year + 1))
         by_year = [
             (y, revenue_per_season, ops_per_season + (price.seed_cost_eur_ha if y == start_year else 0.0))
             for y in seasons
         ]
         return PlantingEconomics(
-            p,
+            name,
+            role,
             revenue_per_season * len(seasons),
             price.seed_cost_eur_ha,
             ops_per_season * len(seasons),
@@ -157,7 +170,8 @@ def _planting_economics(p: Planting) -> PlantingEconomics:
         )
 
     return PlantingEconomics(
-        p,
+        name,
+        role,
         revenue_per_season,
         price.seed_cost_eur_ha,
         ops_per_season,
@@ -166,18 +180,20 @@ def _planting_economics(p: Planting) -> PlantingEconomics:
     )
 
 
-def strategy_economics(strategy: Strategy) -> StrategyEconomics:
-    """Per-hectare economics of one pass through the rotation."""
-    plantings = [_planting_economics(p) for p in strategy.plantings]
-    years = [
+def strategy_economics(plantings: list[dict], years: int) -> StrategyEconomics:
+    """Per-hectare economics of one pass through a generated rotation."""
+    priced = [_planting_economics(p) for p in plantings]
+    price_years = [
         price.year
-        for p in strategy.plantings
-        if p.role != "cover" and (price := CROP_PRICES.get(p.crop_id)) and price.year
+        for p in plantings
+        if p["role"] != "cover"
+        and (price := CROP_PRICES.get(PRICE_ALIASES.get(p["crop_id"], p["crop_id"])))
+        and price.year
     ]
     return StrategyEconomics(
-        plantings=plantings,
-        years=strategy.duration_years,
-        price_year=max(years) if years else None,
+        plantings=priced,
+        years=years,
+        price_year=max(price_years) if price_years else None,
     )
 
 

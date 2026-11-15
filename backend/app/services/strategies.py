@@ -1,304 +1,512 @@
-"""Crop rotation strategies.
+"""Mock-data crop rotation generation and multi-objective strategy ranking.
 
-Hard-coded for now: a handful of multi-year plans written for a Dobrudzha-like
-climate (cold winters, dry hot summers, chernozem soils). The router ranks them
-by how many of the requested crops they use; the area isn't used yet.
+The crop profiles are illustrative MVP inputs, not locally validated farm
+budgets or agronomic recommendations.
 """
 
-from dataclasses import dataclass, field
-from typing import Literal
-
-Role = Literal["cash", "cover", "forage"]
-Trait = Literal["nitrogen_fixing", "deep_rooting", "drought_tolerant", "cover"]
-Level = Literal["low", "medium", "high"]
+from dataclasses import dataclass
+from itertools import product
+from typing import Any
 
 
 @dataclass(frozen=True)
-class Planting:
-    crop_id: str
-    crop_name: str
-    role: Role
-    # rotation year (1-based) and calendar month (1-12), both inclusive
-    start: tuple[int, int]
-    end: tuple[int, int]
-    # total over the whole planting, not per year
-    water_use_mm: int
-    traits: tuple[Trait, ...] = ()
-    note: str = ""
-
-
-@dataclass(frozen=True)
-class Rating:
-    score: int  # 1-5, higher is better
-    summary: str
-
-
-@dataclass(frozen=True)
-class Assessment:
-    level: Level
-    summary: str
-
-
-@dataclass(frozen=True)
-class CropRole:
-    importance: Level
-    summary: str
-
-
-@dataclass(frozen=True)
-class Strategy:
+class CropProfile:
     id: str
     name: str
-    summary: str
-    plantings: tuple[Planting, ...]
-    nutrient_cycling: Rating
-    organic_matter: Rating
-    pest_disruption: Rating
-    forage_potential: Rating
-    market: Rating
-    soil_improvement: Rating
-    erosion_risk: Assessment
-    water_use: Assessment
-    nitrogen_fixing: CropRole
-    cover_crops: CropRole
-    deep_rooting: CropRole
-    drought_tolerant: CropRole
-    market_considerations: tuple[str, ...] = field(default=())
+    family: str
+    sow_month: int
+    harvest_month: int
+    gross_revenue_eur_ha: float
+    variable_cost_eur_ha: float
+    soil_benefit: float
+    risk: float
+    water_demand_mm: int
+    suitability: float
+    traits: tuple[str, ...] = ()
+    requires_irrigation: bool = False
+    return_gap_positions: int = 3
+    family_gap_positions: int = 1
+    role: str = "cash"
+    note: str = ""
 
     @property
-    def duration_years(self) -> int:
-        return max(p.end[0] for p in self.plantings)
+    def duration_months(self) -> int:
+        return (self.harvest_month - self.sow_month) % 12 + 1
 
-    def water_by_year(self) -> list[int]:
-        """Each planting's water use spread evenly over its months, summed per year."""
-        totals = [0.0] * self.duration_years
-        for p in self.plantings:
-            months = _month_index(p.end) - _month_index(p.start) + 1
-            per_month = p.water_use_mm / months
-            for m in range(_month_index(p.start), _month_index(p.end) + 1):
-                totals[m // 12] += per_month
-        return [round(t) for t in totals]
+    @property
+    def profit_eur_ha(self) -> float:
+        return self.gross_revenue_eur_ha - self.variable_cost_eur_ha
 
 
-def _month_index(at: tuple[int, int]) -> int:
-    year, month = at
-    return (year - 1) * 12 + (month - 1)
-
-
-STRATEGIES: tuple[Strategy, ...] = (
-    Strategy(
-        id="wheat-sunflower-legume",
-        name="Wheat–sunflower with a legume break",
-        summary=(
-            "A four-year cereal–oilseed rotation that slips a vetch–oat cover "
-            "between wheat and sunflower to feed nitrogen into the next crops "
-            "and keep the soil covered over winter."
-        ),
-        plantings=(
-            Planting("wheat", "Winter wheat", "cash", (1, 10), (2, 7), 450,
-                     note="Sown after the first autumn rains."),
-            Planting("vetch_oats", "Vetch + oats", "cover", (2, 8), (3, 3), 120,
-                     ("nitrogen_fixing", "cover"),
-                     "Terminated in March, 4–6 weeks before sunflower."),
-            Planting("sunflower", "Sunflower", "cash", (3, 4), (3, 9), 480,
-                     ("deep_rooting", "drought_tolerant")),
-            Planting("barley", "Winter barley", "cash", (3, 10), (4, 6), 380,
-                     note="Early harvest leaves time for a summer cover."),
-        ),
-        nutrient_cycling=Rating(4, "Vetch fixes ~60–90 kg N/ha; sunflower roots recover nitrate leached below the wheat root zone."),
-        organic_matter=Rating(3, "Cereal straw plus one cover crop; moderate residue return."),
-        pest_disruption=Rating(4, "Never two cereals back to back; the broadleaf break interrupts take-all and cereal aphids."),
-        forage_potential=Rating(3, "The vetch–oat mix can be grazed or cut as hay if spring is wet."),
-        market=Rating(4, "All three cash crops trade in bulk at Varna and Constanța ports."),
-        soil_improvement=Rating(4, "Winter cover and deep sunflower roots improve structure and water infiltration."),
-        erosion_risk=Assessment("low", "Ground is covered for all but ~5 weeks a year."),
-        water_use=Assessment("medium", "Sunflower draws deep reserves; the cover is killed early to protect them."),
-        nitrogen_fixing=CropRole("high", "The vetch break is the main nitrogen source; cuts mineral N for sunflower by ~40 kg/ha."),
-        cover_crops=CropRole("high", "Keeps the bare post-wheat window from August to March protected."),
-        deep_rooting=CropRole("medium", "Sunflower reaches 2 m and recycles leached nutrients."),
-        drought_tolerant=CropRole("medium", "Sunflower handles July–August dry spells better than maize."),
-        market_considerations=(
-            "Sunflower oil demand is stable; prices track the Black Sea export market.",
-            "Malting barley earns a premium if protein stays under 11.5%.",
-            "Cover seed adds ~€60/ha in costs, partly offset by lower N fertiliser.",
-        ),
-    ),
-    Strategy(
-        id="drought-resilient",
-        name="Drought-resilient pulse rotation",
-        summary=(
-            "Built around dry summers: sunflower and chickpea do the heavy "
-            "lifting, and a short phacelia cover protects the soil without "
-            "spending much water."
-        ),
-        plantings=(
-            Planting("sunflower", "Sunflower", "cash", (1, 4), (1, 9), 480,
-                     ("deep_rooting", "drought_tolerant")),
-            Planting("wheat", "Winter wheat", "cash", (1, 10), (2, 7), 450),
-            Planting("phacelia", "Phacelia", "cover", (2, 8), (2, 11), 90,
-                     ("cover",), "Frost-killed; no herbicide needed."),
-            Planting("chickpea", "Chickpea", "cash", (3, 3), (3, 7), 300,
-                     ("nitrogen_fixing", "drought_tolerant")),
-            Planting("barley", "Winter barley", "cash", (3, 10), (4, 6), 380),
-        ),
-        nutrient_cycling=Rating(4, "Chickpea leaves 30–50 kg N/ha for the following barley."),
-        organic_matter=Rating(2, "Low-residue pulses and a light cover add little carbon."),
-        pest_disruption=Rating(4, "Three plant families; phacelia also attracts aphid predators."),
-        forage_potential=Rating(1, "No forage component."),
-        market=Rating(3, "Chickpea prices are good but the local buyer base is thin."),
-        soil_improvement=Rating(3, "Gains mostly from the legume; little added structure."),
-        erosion_risk=Assessment("medium", "Bare from November to March before chickpea."),
-        water_use=Assessment("low", "Lowest water draw of the set; suits <450 mm rainfall years."),
-        nitrogen_fixing=CropRole("medium", "Chickpea fixes less than vetch or soybean but needs no irrigation."),
-        cover_crops=CropRole("medium", "One short cover; longer covers would cost too much stored water."),
-        deep_rooting=CropRole("medium", "Sunflower opens deep channels for the wheat that follows."),
-        drought_tolerant=CropRole("high", "The point of this plan: two of four cash crops tolerate drought."),
-        market_considerations=(
-            "Chickpea needs a contract buyer; spot markets in Bulgaria are small.",
-            "Lower input costs keep margins steady in dry years.",
-        ),
-    ),
-    Strategy(
-        id="alfalfa-ley",
-        name="Alfalfa ley with rapeseed and wheat",
-        summary=(
-            "Two and a half years of alfalfa rebuild soil and feed livestock, "
-            "followed by high-value rapeseed and wheat that use the stored "
-            "nitrogen."
-        ),
-        plantings=(
-            Planting("alfalfa", "Alfalfa", "forage", (1, 4), (3, 8), 1500,
-                     ("nitrogen_fixing", "deep_rooting", "drought_tolerant"),
-                     "3–4 cuts a year once established."),
-            Planting("rapeseed", "Winter rapeseed", "cash", (3, 9), (4, 7), 500,
-                     ("deep_rooting",)),
-            Planting("wheat", "Winter wheat", "cash", (4, 10), (5, 7), 450),
-            Planting("mustard", "White mustard", "cover", (5, 8), (5, 11), 80,
-                     ("cover",), "Biofumigant against soil pests."),
-        ),
-        nutrient_cycling=Rating(5, "Alfalfa fixes 150+ kg N/ha a year; rapeseed and wheat need little added N."),
-        organic_matter=Rating(5, "Perennial roots and no tillage for 2+ years add the most carbon."),
-        pest_disruption=Rating(5, "A long perennial break and mustard biofumigation reset weed and pest cycles."),
-        forage_potential=Rating(5, "8–12 t/ha of hay a year during the ley."),
-        market=Rating(3, "Hay needs a nearby livestock buyer; rapeseed is a strong cash crop."),
-        soil_improvement=Rating(5, "Best structure and infiltration of all plans."),
-        erosion_risk=Assessment("low", "Permanent cover for the first 2.5 years."),
-        water_use=Assessment("high", "Alfalfa uses the most water; the deep roots draw on subsoil reserves."),
-        nitrogen_fixing=CropRole("high", "Alfalfa supplies most of the rotation's nitrogen."),
-        cover_crops=CropRole("medium", "The ley itself is the cover; mustard covers the gap after wheat."),
-        deep_rooting=CropRole("high", "Alfalfa roots reach 3–4 m and break up compacted layers."),
-        drought_tolerant=CropRole("medium", "Established alfalfa survives drought but yields drop sharply."),
-        market_considerations=(
-            "Only viable with a livestock farm or hay buyer within ~50 km.",
-            "Rapeseed has the highest gross margin of the cash crops here.",
-            "No grain income in years 1–2; cash flow is uneven.",
-        ),
-    ),
-    Strategy(
-        id="maize-soy-wheat",
-        name="Maize–soybean–wheat with winter covers",
-        summary=(
-            "A higher-yield, higher-input plan for wetter years or irrigated "
-            "land, with a cover after every cash crop."
-        ),
-        plantings=(
-            Planting("maize", "Maize", "cash", (1, 4), (1, 9), 600),
-            Planting("rye", "Cereal rye", "cover", (1, 10), (2, 4), 100,
-                     ("cover",), "Rolled before soybean is planted."),
-            Planting("soybean", "Soybean", "cash", (2, 5), (2, 9), 500,
-                     ("nitrogen_fixing",)),
-            Planting("wheat", "Winter wheat", "cash", (2, 10), (3, 7), 450),
-            Planting("clover_radish", "Crimson clover + radish", "cover", (3, 8), (3, 11), 90,
-                     ("nitrogen_fixing", "deep_rooting", "cover")),
-        ),
-        nutrient_cycling=Rating(4, "Soybean and clover add N; rye catches what maize leaves behind."),
-        organic_matter=Rating(4, "Maize stover plus two covers return lots of residue."),
-        pest_disruption=Rating(3, "Corn rootworm is broken by soybean, but the plan is only three years."),
-        forage_potential=Rating(2, "Rye can be grazed in early spring."),
-        market=Rating(5, "Maize, soybean and wheat have the deepest markets."),
-        soil_improvement=Rating(4, "Radish tap roots relieve compaction; covers protect structure."),
-        erosion_risk=Assessment("low", "Covered almost year-round."),
-        water_use=Assessment("high", "Maize and soybean are thirsty; rainfed yields swing a lot."),
-        nitrogen_fixing=CropRole("high", "Soybean and clover cover the wheat's nitrogen needs."),
-        cover_crops=CropRole("high", "Two covers keep roots in the soil through both winters."),
-        deep_rooting=CropRole("low", "Only the short radish cover roots deeply."),
-        drought_tolerant=CropRole("low", "No drought-tolerant crop; risky without irrigation."),
-        market_considerations=(
-            "Non-GM soybean earns a premium in EU feed markets.",
-            "Maize drying costs eat into margins in wet autumns.",
-        ),
-    ),
-    Strategy(
-        id="short-wheat-sunflower",
-        name="Two-year wheat–sunflower",
-        summary=(
-            "The simplest plan: alternate sunflower and wheat, with a pea–oat "
-            "cover to fill the summer gap."
-        ),
-        plantings=(
-            Planting("sunflower", "Sunflower", "cash", (1, 4), (1, 9), 480,
-                     ("deep_rooting", "drought_tolerant")),
-            Planting("wheat", "Winter wheat", "cash", (1, 10), (2, 7), 450),
-            Planting("pea_oats", "Field pea + oats", "cover", (2, 8), (2, 11), 100,
-                     ("nitrogen_fixing", "cover")),
-        ),
-        nutrient_cycling=Rating(3, "The pea cover adds some N; otherwise relies on fertiliser."),
-        organic_matter=Rating(2, "Little residue beyond wheat straw."),
-        pest_disruption=Rating(2, "Sunflower every other year raises broomrape and Sclerotinia risk."),
-        forage_potential=Rating(2, "The pea–oat cover can be grazed in autumn."),
-        market=Rating(4, "Two liquid, well-known commodities."),
-        soil_improvement=Rating(2, "Maintains rather than improves soil."),
-        erosion_risk=Assessment("medium", "Bare from November to April before sunflower."),
-        water_use=Assessment("medium", "Typical rainfed water draw for the region."),
-        nitrogen_fixing=CropRole("medium", "Only the short pea cover fixes nitrogen."),
-        cover_crops=CropRole("medium", "One cover a cycle; extending it into spring would help erosion."),
-        deep_rooting=CropRole("medium", "Sunflower every other year."),
-        drought_tolerant=CropRole("medium", "Sunflower handles dry summers."),
-        market_considerations=(
-            "Easy to sell and to manage with existing machinery.",
-            "Disease pressure may force a longer break within a few cycles.",
-        ),
-    ),
+MOCK_CROPS: tuple[CropProfile, ...] = (
+    CropProfile("wheat", "Winter wheat", "cereal", 10, 7, 1450, 760, 42, 48, 450, 82,
+                ("cover",), note="Illustrative autumn-sown cereal profile."),
+    CropProfile("barley", "Winter barley", "cereal", 10, 6, 1250, 680, 45, 42, 380, 76,
+                ("cover",), note="Illustrative early-harvest cereal profile."),
+    CropProfile("maize", "Maize", "cereal", 4, 9, 1900, 1100, 35, 72, 600, 68,
+                requires_irrigation=True, note="Mock profile assumes irrigation is available."),
+    CropProfile("sunflower", "Sunflower", "oilseed", 4, 9, 1650, 820, 55, 38, 480, 86,
+                ("deep_rooting", "drought_tolerant")),
+    CropProfile("rapeseed", "Winter rapeseed", "oilseed", 8, 5, 2050, 1250, 48, 64, 500, 60,
+                ("deep_rooting",)),
+    CropProfile("chickpea", "Chickpea", "legume", 3, 7, 1750, 900, 78, 40, 300, 58,
+                ("nitrogen_fixing", "drought_tolerant")),
+    CropProfile("soybean", "Soybean", "legume", 5, 10, 1800, 1050, 72, 55, 500, 52,
+                ("nitrogen_fixing",), requires_irrigation=True),
+    CropProfile("field_pea", "Field pea", "legume", 3, 7, 1500, 760, 82, 35, 280, 64,
+                ("nitrogen_fixing", "cover")),
+    CropProfile("oat", "Oat", "cereal", 3, 7, 1320, 700, 48, 40, 350, 70,
+                ("cover",), note="Illustrative spring-sown oat profile."),
+    CropProfile("flax", "Flax", "oilseed", 3, 8, 1700, 980, 54, 52, 420, 62,
+                ("deep_rooting",), note="Illustrative spring-sown flax profile."),
+    CropProfile("buckwheat", "Buckwheat", "pseudocereal", 5, 9, 1550, 780, 68, 42, 320, 66,
+                ("drought_tolerant",), note="Illustrative warm-season buckwheat profile."),
 )
 
-
-# HCAT codes are hierarchical; the last two digits are the season variant
-# (00 any, 01 winter, 02 spring, 99 unspecified), so code // 100 is the crop
-# itself. A requested crop matches a planting if their crop codes agree.
-HCAT_CROPS = {
-    "wheat": (33010101, 33010102),  # common soft and durum wheat
-    "rye": (33010103,),
-    "barley": (33010104,),
-    "maize": (33010106,),  # grain maize
-    "chickpea": (33010202,),
-    "rapeseed": (33010604,),
-    "sunflower": (33010605,),
-    "alfalfa": (33010903,),
-    "soybean": (33011600,),
+CROP_BY_ID = {crop.id: crop for crop in MOCK_CROPS}
+COMPONENTS = ("profit", "soil_benefit", "risk_control", "water_efficiency", "feasibility")
+STRATEGY_PROFILES: dict[str, dict[str, float]] = {
+    "profit_first": {
+        "profit": 0.45, "soil_benefit": 0.10, "risk_control": 0.10,
+        "water_efficiency": 0.10, "feasibility": 0.25,
+    },
+    "soil_builder": {
+        "profit": 0.15, "soil_benefit": 0.40, "risk_control": 0.15,
+        "water_efficiency": 0.10, "feasibility": 0.20,
+    },
+    "risk_balanced": {
+        "profit": 0.15, "soil_benefit": 0.15, "risk_control": 0.40,
+        "water_efficiency": 0.15, "feasibility": 0.15,
+    },
+    "water_efficient": {
+        "profit": 0.15, "soil_benefit": 0.15, "risk_control": 0.15,
+        "water_efficiency": 0.40, "feasibility": 0.15,
+    },
+    "balanced": {
+        "profit": 0.20, "soil_benefit": 0.20, "risk_control": 0.20,
+        "water_efficiency": 0.20, "feasibility": 0.20,
+    },
 }
+STRATEGY_NAMES = {
+    "profit_first": ("Profit-focused", "Prioritizes illustrative rotation gross margin."),
+    "soil_builder": ("Soil-building", "Prioritizes legume, cover, and soil-benefit traits."),
+    "risk_balanced": ("Risk-balanced", "Favors more resilient crops with lower modeled risk."),
+    "water_efficient": ("Water-efficient", "Favors lower water demand and profit per water unit."),
+    "balanced": ("Balanced", "Balances profit, soil benefit, risk, water efficiency, and feasibility."),
+}
+DEFAULT_BASELINE = ("wheat", "sunflower", "barley", "chickpea", "rapeseed")
+MIN_SUITABILITY = 25.0
+MAX_FALLOW_MONTHS = 10
 
 
-def _uses(strategy: Strategy, crop: str, hcat3: int | None) -> bool:
-    return any(
-        p.crop_id == crop
-        or (hcat3 is not None and hcat3 // 100 in HCAT_CROPS.get(p.crop_id, ()))
-        for p in strategy.plantings
-    )
+def _crop_profile(value: CropProfile | str | dict[str, Any]) -> CropProfile:
+    if isinstance(value, CropProfile):
+        return value
+    crop_id = value if isinstance(value, str) else value.get("id")
+    if crop_id not in CROP_BY_ID:
+        raise ValueError(f"Unknown crop id: {crop_id}")
+    return CROP_BY_ID[crop_id]
 
 
-def strategies_for(
-    crops: list[str], hcat3_by_crop: dict[str, int] | None = None
-) -> list[tuple[Strategy, list[str]]]:
-    """All strategies with the requested crops each one uses, best match first.
+def _available(crops: list[CropProfile], territory: dict[str, Any]) -> list[CropProfile]:
+    excluded = set(territory.get("excluded_crops", ()))
+    scores = territory.get("crop_suitability", {})
+    irrigation = territory.get("irrigation_available", False)
+    available = []
+    for crop in dict((crop.id, crop) for crop in crops).values():
+        suitability = float(scores.get(crop.id, crop.suitability))
+        if crop.id in excluded or suitability < MIN_SUITABILITY:
+            continue
+        if crop.requires_irrigation and not irrigation:
+            continue
+        available.append(crop)
+    return available
 
-    `crops` are crop_soil_scores keys (matched by HCAT code) or the plans'
-    own ids like "wheat".
-    """
-    codes = hcat3_by_crop or {}
-    wanted = set(crops)
-    matched = [
-        (s, [c for c in crops if _uses(s, c, codes.get(c))])
-        for s in STRATEGIES
+
+def _rotation_constraint_penalty(
+    sequence: tuple[CropProfile, ...],
+    history: list[str],
+) -> float:
+    prior_crops = [
+        (index, CROP_BY_ID[crop_id])
+        for index, crop_id in enumerate(history)
+        if crop_id in CROP_BY_ID
     ]
-    # stable sort keeps the hand-picked order among equal matches
-    return sorted(matched, key=lambda m: -len(set(m[1]) & wanted))
+    penalty = 0.0
+    for position, candidate in enumerate(sequence):
+        current_position = len(history) + position
+        same_crop_positions = [
+            index for index, crop in prior_crops
+            if crop.id == candidate.id
+        ]
+        family_positions = [
+            index for index, crop in prior_crops
+            if crop.family == candidate.family
+        ]
+        for prior_position in same_crop_positions:
+            gap = current_position - prior_position
+            if gap < candidate.return_gap_positions:
+                penalty += 10 * (
+                    candidate.return_gap_positions - gap
+                ) / candidate.return_gap_positions
+        for prior_position in family_positions:
+            gap = current_position - prior_position
+            if gap <= candidate.family_gap_positions:
+                penalty += 5 * (
+                    candidate.family_gap_positions + 1 - gap
+                ) / (candidate.family_gap_positions + 1)
+        prior_crops.append((current_position, candidate))
+    return round(penalty, 2)
+
+
+def _schedule(sequence: tuple[CropProfile, ...]) -> list[dict[str, Any]] | None:
+    scheduled: list[dict[str, Any]] = []
+    previous_harvest_index: int | None = None
+    for crop in sequence:
+        if previous_harvest_index is None:
+            sow_index = crop.sow_month - 1
+        else:
+            sow_index = previous_harvest_index + 1
+            while sow_index % 12 != crop.sow_month - 1:
+                sow_index += 1
+            fallow_months = sow_index - previous_harvest_index - 1
+            if fallow_months > MAX_FALLOW_MONTHS:
+                return None
+
+        harvest_index = sow_index + crop.duration_months - 1
+        scheduled.append({
+            "crop": crop,
+            "start": (sow_index // 12 + 1, sow_index % 12 + 1),
+            "end": (harvest_index // 12 + 1, harvest_index % 12 + 1),
+            "sow_index": sow_index,
+            "harvest_index": harvest_index,
+        })
+        previous_harvest_index = harvest_index
+    return scheduled
+
+
+def generate_valid_rotations(
+    territory: dict[str, Any],
+    crops: list[CropProfile | str | dict[str, Any]],
+    years: int = 3,
+) -> list[dict[str, Any]]:
+    """Enumerate season-compatible crop sequences and score rotation gaps.
+
+    ``previously_planted`` is chronological, oldest to newest. A candidate
+    crop sequence has one crop event per requested position; calendar dates
+    are scheduled after the prior crop's harvest.
+    """
+    if years < 1:
+        raise ValueError("years must be at least 1")
+    profiles = [_crop_profile(crop) for crop in crops]
+    available = _available(profiles, territory)
+    if not available:
+        return []
+
+    history = list(territory.get("previously_planted", ()))
+    rotations = []
+    for ids in product(available, repeat=years):
+        sequence = tuple(ids)
+        schedule = _schedule(sequence)
+        if schedule is None:
+            continue
+        rotations.append({
+            "crop_ids": [crop.id for crop in sequence],
+            "schedule": schedule,
+            "rotation_constraint_penalty": _rotation_constraint_penalty(sequence, history),
+        })
+    return rotations
+
+
+def _linear_score(value: float, low: float, high: float) -> float:
+    if high == low:
+        score = 50.0
+    else:
+        score = 100 * (value - low) / (high - low)
+    return max(0.0, min(100.0, score))
+
+
+def _metrics(rotation: dict[str, Any], territory: dict[str, Any]) -> dict[str, Any]:
+    crops: list[CropProfile] = [item["crop"] for item in rotation["schedule"]]
+    suitability = territory.get("crop_suitability", {})
+    scores = [float(suitability.get(crop.id, crop.suitability)) for crop in crops]
+    preferred = set(territory.get("preferred_crops", ())) & set(CROP_BY_ID)
+    preferred_fraction = (
+        len(preferred.intersection(crop.id for crop in crops)) / len(preferred)
+        if preferred else 1.0
+    )
+    profit = sum(crop.profit_eur_ha for crop in crops)
+    soil_benefit = sum(crop.soil_benefit for crop in crops) / len(crops)
+    risk = sum(crop.risk for crop in crops) / len(crops)
+    water = sum(crop.water_demand_mm for crop in crops)
+    rotation_penalty = float(rotation.get("rotation_constraint_penalty", 0.0))
+    feasibility = max(
+        0.0,
+        0.8 * (sum(scores) / len(scores)) + 20 * preferred_fraction - rotation_penalty,
+    )
+    return {
+        "profit_eur_ha": round(profit, 2),
+        "soil_benefit_score": round(soil_benefit, 2),
+        "risk_score": round(risk, 2),
+        "water_demand_mm": water,
+        "water_efficiency_score": None,
+        "agronomic_feasibility_score": round(feasibility, 2),
+        "feasible": True,
+        "suitability_scores": [round(score, 2) for score in scores],
+        "preferred_crop_coverage": round(preferred_fraction, 3),
+        "rotation_constraint_penalty": rotation_penalty,
+    }
+
+
+def _baseline_metrics(baseline: list[str], territory: dict[str, Any]) -> dict[str, Any]:
+    crops = [_crop_profile(crop) for crop in baseline]
+    schedule = _schedule(tuple(crops))
+    if schedule is None:
+        raise ValueError("baseline rotation contains incompatible growing seasons")
+    rotation = {"crop_ids": [crop.id for crop in crops], "schedule": schedule}
+    metrics = _metrics(rotation, territory)
+    metrics["water_efficiency_score"] = round(
+        100 * metrics["profit_eur_ha"] / max(metrics["water_demand_mm"], 1), 2
+    )
+    return metrics
+
+
+def evaluate_baseline(territory: dict[str, Any]) -> dict[str, Any]:
+    crop_ids = territory.get("baseline_rotation") or list(DEFAULT_BASELINE)
+    metrics = _baseline_metrics(crop_ids, territory)
+    return {
+        "crop_ids": crop_ids,
+        "profit_eur_ha": metrics["profit_eur_ha"],
+        "soil_benefit_score": metrics["soil_benefit_score"],
+        "risk_score": metrics["risk_score"],
+        "water_demand_mm": metrics["water_demand_mm"],
+    }
+
+
+def _to_legacy_shape(
+    rotation: dict[str, Any],
+    metrics: dict[str, Any],
+    strategy_type: str,
+    ranking: int,
+    score: float,
+    matched_crops: list[str],
+    baseline_metrics: dict[str, Any],
+) -> dict[str, Any]:
+    crops: list[CropProfile] = [item["crop"] for item in rotation["schedule"]]
+    soil_score = round(sum(crop.soil_benefit for crop in crops) / len(crops))
+    risk_score = round(sum(crop.risk for crop in crops) / len(crops))
+    water_level = (
+        "low" if metrics["water_demand_mm"] <= 1000
+        else "medium" if metrics["water_demand_mm"] <= 1400
+        else "high"
+    )
+    duration_years = max(item["end"][0] for item in rotation["schedule"])
+    by_year = [0.0] * duration_years
+    for item in rotation["schedule"]:
+        crop = item["crop"]
+        start = (item["start"][0] - 1) * 12 + item["start"][1] - 1
+        end = (item["end"][0] - 1) * 12 + item["end"][1] - 1
+        monthly = crop.water_demand_mm / (end - start + 1)
+        for month_index in range(start, end + 1):
+            by_year[month_index // 12] += monthly
+
+    return {
+        "id": f"{strategy_type}-" + "-".join(rotation["crop_ids"]),
+        "name": STRATEGY_NAMES[strategy_type][0],
+        "summary": STRATEGY_NAMES[strategy_type][1],
+        "duration_years": duration_years,
+        "matched_crops": matched_crops,
+        "rotation": rotation["crop_ids"],
+        "strategy_type": strategy_type,
+        "ranking": ranking,
+        "score": round(score, 2),
+        "plantings": [
+            {
+                "crop_id": crop.id,
+                "crop_name": crop.name,
+                "role": crop.role,
+                "start": {"year": item["start"][0], "month": item["start"][1]},
+                "end": {"year": item["end"][0], "month": item["end"][1]},
+                "water_use_mm": crop.water_demand_mm,
+                "traits": list(crop.traits),
+                "note": crop.note or "Illustrative mock crop profile.",
+            }
+            for item, crop in zip(rotation["schedule"], crops)
+        ],
+        "ratings": {
+            "nutrient_cycling": {"score": _rating(crops, "nitrogen_fixing"), "summary": "Mock rating based on legume presence."},
+            "organic_matter": {"score": _scale_rating(soil_score), "summary": "Mock rating based on residue and cover traits."},
+            "pest_disruption": {"score": _scale_rating(100 - risk_score), "summary": "Mock rating based on the crop risk profiles."},
+            "forage_potential": {"score": _rating(crops, "forage"), "summary": "Mock rating; none of these crops is modeled as a forage crop."},
+            "market": {"score": 3, "summary": "Market access and prices are not modeled."},
+            "soil_improvement": {"score": _scale_rating(soil_score), "summary": "Mock rating based on soil-benefit profiles."},
+        },
+        "erosion_risk": {
+            "level": "low" if soil_score >= 65 else "medium" if soil_score >= 45 else "high",
+            "summary": "Illustrative risk proxy; not a measured erosion forecast.",
+        },
+        "water_use": {
+            "level": water_level,
+            "summary": "Modeled crop water demand from illustrative profiles.",
+            "by_year_mm": [round(value) for value in by_year],
+        },
+        "crop_roles": {
+            "nitrogen_fixing": _role_assessment(crops, "nitrogen_fixing"),
+            "cover_crops": _role_assessment(crops, "cover"),
+            "deep_rooting": _role_assessment(crops, "deep_rooting"),
+            "drought_tolerant": _role_assessment(crops, "drought_tolerant"),
+        },
+        "market_considerations": [
+            "Profit uses illustrative gross revenue and variable-cost assumptions.",
+            "Validate local buyers, input costs, and yield assumptions before use.",
+        ],
+        "evaluation": metrics,
+        "comparison": {
+            "profit_difference_eur_ha": round(metrics["profit_eur_ha"] - baseline_metrics["profit_eur_ha"], 2),
+            "risk_difference": round(metrics["risk_score"] - baseline_metrics["risk_score"], 2),
+            "soil_benefit_difference": round(metrics["soil_benefit_score"] - baseline_metrics["soil_benefit_score"], 2),
+            "water_demand_difference": metrics["water_demand_mm"] - baseline_metrics["water_demand_mm"],
+        },
+        "explanations": _explanations(metrics, baseline_metrics, crops),
+    }
+
+
+def _scale_rating(value: float) -> int:
+    return max(1, min(5, round(value / 20)))
+
+
+def _rating(crops: list[CropProfile], trait: str) -> int:
+    share = sum(trait in crop.traits for crop in crops) / len(crops)
+    return max(1, min(5, round(1 + share * 4)))
+
+
+def _role_assessment(crops: list[CropProfile], trait: str) -> dict[str, str]:
+    share = sum(trait in crop.traits for crop in crops) / len(crops)
+    level = "high" if share >= 2 / 3 else "medium" if share > 0 else "low"
+    return {"level": level, "summary": f"{sum(trait in crop.traits for crop in crops)} of {len(crops)} crops have this modeled trait."}
+
+
+def _explanations(metrics: dict[str, Any], baseline: dict[str, Any], crops: list[CropProfile]) -> list[str]:
+    differences = (
+        ("profit", metrics["profit_eur_ha"] - baseline["profit_eur_ha"], "more", "less"),
+        ("soil benefit", metrics["soil_benefit_score"] - baseline["soil_benefit_score"], "higher", "lower"),
+        ("risk", metrics["risk_score"] - baseline["risk_score"], "higher", "lower"),
+        ("water demand", metrics["water_demand_mm"] - baseline["water_demand_mm"], "more", "less"),
+    )
+    explanations = []
+    for label, delta, positive, negative in differences:
+        if abs(delta) < 0.01:
+            explanations.append(f"Modeled {label} is similar to the baseline.")
+        elif label == "risk":
+            explanations.append(f"Modeled risk is {positive if delta > 0 else negative} than the baseline.")
+        else:
+            explanations.append(f"Modeled {label} is {positive if delta > 0 else negative} than the baseline.")
+    traits = sorted({trait for crop in crops for trait in crop.traits})
+    if traits:
+        explanations.append("Rotation traits: " + ", ".join(traits) + ".")
+    explanations.append("All values are illustrative mock estimates, not farm-specific predictions.")
+    return explanations
+
+
+def rank_rotation_strategies(
+    rotations: list[dict[str, Any]], territory: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Return the top rotation for each strategy objective, reusing when needed."""
+    if not rotations:
+        return []
+    baseline_ids = territory.get("baseline_rotation") or list(DEFAULT_BASELINE)
+    baseline_metrics = _baseline_metrics(baseline_ids, territory)
+    metric_list = [_metrics(rotation, territory) for rotation in rotations]
+    profits = [metrics["profit_eur_ha"] for metrics in metric_list]
+    water_efficiencies = [
+        metrics["profit_eur_ha"] / max(metrics["water_demand_mm"], 1)
+        for metrics in metric_list
+    ]
+    profit_range = (min(profits), max(profits))
+    water_range = (min(water_efficiencies), max(water_efficiencies))
+    for metrics, efficiency in zip(metric_list, water_efficiencies):
+        metrics["water_efficiency_score"] = round(
+            _linear_score(efficiency, *water_range), 2
+        )
+
+    profiles = dict(STRATEGY_PROFILES)
+    for name, overrides in territory.get("strategy_weights", {}).items():
+        if name not in profiles:
+            raise ValueError(f"Unknown strategy weight profile: {name}")
+        if any(value < 0 for value in overrides.values()):
+            raise ValueError("strategy weights must be non-negative")
+        profiles[name] = {component: overrides.get(component, 0.0) for component in COMPONENTS}
+    used_rotations: set[tuple[str, ...]] = set()
+    strategies = []
+    for strategy_type, default_weights in profiles.items():
+        weights = default_weights
+        weight_total = sum(weights.values())
+        if weight_total <= 0:
+            raise ValueError(f"strategy weights for {strategy_type} must sum to more than zero")
+        scores = []
+        for rotation, metrics in zip(rotations, metric_list):
+            components = {
+                "profit": _linear_score(metrics["profit_eur_ha"], *profit_range),
+                "soil_benefit": metrics["soil_benefit_score"],
+                "risk_control": 100 - metrics["risk_score"],
+                "water_efficiency": metrics["water_efficiency_score"],
+                "feasibility": metrics["agronomic_feasibility_score"],
+            }
+            normalized = {key: value / weight_total for key, value in weights.items()}
+            score = sum(components[key] * weight for key, weight in normalized.items())
+            scores.append(score)
+
+        ordered = sorted(
+            range(len(rotations)),
+            key=lambda index: (
+                -scores[index],
+                tuple(rotations[index]["crop_ids"]),
+            ),
+        )
+        selected = next(
+            (index for index in ordered if tuple(rotations[index]["crop_ids"]) not in used_rotations),
+            ordered[0],
+        )
+        rotation_key = tuple(rotations[selected]["crop_ids"])
+        reused_rotation = rotation_key in used_rotations
+        used_rotations.add(rotation_key)
+        metrics = metric_list[selected]
+        preferred = set(territory.get("preferred_crops", ()))
+        matched = sorted(preferred.intersection(rotations[selected]["crop_ids"]))
+        name, summary = STRATEGY_NAMES[strategy_type]
+        selected_components = {
+            "profit": _linear_score(metrics["profit_eur_ha"], *profit_range),
+            "soil_benefit": metrics["soil_benefit_score"],
+            "risk_control": 100 - metrics["risk_score"],
+            "water_efficiency": metrics["water_efficiency_score"],
+            "feasibility": metrics["agronomic_feasibility_score"],
+        }
+        strategy = _to_legacy_shape(
+            rotations[selected], metrics, strategy_type, len(strategies) + 1,
+            scores[selected], matched, baseline_metrics,
+        )
+        strategy["name"] = name
+        strategy["summary"] = summary
+        strategy["explanations"].insert(
+            0, f"Selected using the {strategy_type.replace('_', ' ')} weighted scoring profile."
+        )
+        if reused_rotation:
+            strategy["explanations"].append(
+                "no distinct sequence remained for this strategy type; the highest-scoring "
+                "available sequence is reused."
+            )
+        strategy["evaluation"]["water_efficiency_score"] = metrics["water_efficiency_score"]
+        strategy["evaluation"]["score_components"] = {
+            _camel_key(key): value for key, value in selected_components.items()
+        }
+        strategy["evaluation"]["scoring_weights"] = {
+            _camel_key(key): round(value / weight_total, 3)
+            for key, value in weights.items()
+        }
+        strategies.append(strategy)
+    return strategies
+
+
+def _camel_key(value: str) -> str:
+    first, *rest = value.split("_")
+    return first + "".join(part.capitalize() for part in rest)

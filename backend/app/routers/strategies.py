@@ -1,8 +1,8 @@
 import logging
 from typing import Literal
 
-from fastapi import APIRouter
-from pydantic import Field, model_validator
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.routers.crops import Bounds, CamelModel, SelectedField
 from app.services import strategies as svc
@@ -13,17 +13,59 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["strategies"])
 
+StrategyType = Literal[
+    "profit_first", "soil_builder", "risk_balanced", "water_efficient", "balanced"
+]
 
-class StrategiesRequest(CamelModel):
-    crops: list[str] = Field(min_length=1)
-    # the land: a drawn rectangle or picked fields, same shapes as /crops
-    bounds: Bounds | None = None
-    fields: list[SelectedField] | None = Field(default=None, min_length=1, max_length=10_000)
+
+class StrategyWeights(CamelModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profit: float | None = Field(default=None, ge=0)
+    soil_benefit: float | None = Field(default=None, ge=0)
+    risk_control: float | None = Field(default=None, ge=0)
+    water_efficiency: float | None = Field(default=None, ge=0)
+    feasibility: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
-    def check_area(self) -> "StrategiesRequest":
+    def has_positive_weight(self) -> "StrategyWeights":
+        if not any(value and value > 0 for value in self.model_dump().values()):
+            raise ValueError("each scoring profile must include a positive weight")
+        return self
+
+
+class StrategiesRequest(CamelModel):
+    # ``crops`` is the set the user selected in the existing strategy-page client.
+    crops: list[str] = Field(default_factory=list, max_length=50)
+    bounds: Bounds | None = None
+    fields: list[SelectedField] | None = Field(default=None, min_length=1, max_length=10_000)
+    years: int = Field(default=3, ge=2, le=5)
+    available_crops: list[str] | None = Field(default=None, min_length=1, max_length=8)
+    previously_planted: list[str] = Field(default_factory=list, max_length=20)
+    preferred_crops: list[str] = Field(default_factory=list, max_length=8)
+    excluded_crops: list[str] = Field(default_factory=list, max_length=8)
+    crop_suitability: dict[str, float] = Field(
+        default_factory=dict,
+        description="Optional crop suitability overrides on a 0-100 scale.",
+    )
+    irrigation_available: bool = False
+    baseline_rotation: list[str] | None = Field(default=None, min_length=2, max_length=5)
+    strategy_weights: dict[StrategyType, StrategyWeights] | None = None
+
+    @model_validator(mode="after")
+    def validate_request(self) -> "StrategiesRequest":
         if (self.bounds is None) == (self.fields is None):
             raise ValueError("send exactly one of bounds or fields")
+        if not (self.crops or self.available_crops):
+            raise ValueError("select at least one crop using crops or availableCrops")
+        if any(not 0 <= score <= 100 for score in self.crop_suitability.values()):
+            raise ValueError("cropSuitability scores must be between 0 and 100")
+        if set(self.excluded_crops) & set(self.preferred_crops):
+            raise ValueError("a crop cannot be both preferred and excluded")
+        if set(self.crops) & set(self.excluded_crops):
+            raise ValueError("a crop cannot be both selected and excluded")
+        if self.baseline_rotation and len(self.baseline_rotation) != self.years:
+            raise ValueError("baselineRotation must contain one crop per rotation year")
         return self
 
     def area_ha(self) -> float:
@@ -37,8 +79,8 @@ class StrategiesRequest(CamelModel):
 
 
 class MonthRef(CamelModel):
-    year: int  # rotation year, 1-based
-    month: int  # 1-12
+    year: int
+    month: int
 
 
 class Planting(CamelModel):
@@ -82,6 +124,28 @@ class CropRoles(CamelModel):
     drought_tolerant: Assessment
 
 
+class Evaluation(CamelModel):
+    profit_eur_ha: float
+    soil_benefit_score: float
+    risk_score: float
+    water_demand_mm: int
+    water_efficiency_score: float
+    agronomic_feasibility_score: float
+    feasible: bool
+    suitability_scores: list[float]
+    preferred_crop_coverage: float
+    rotation_constraint_penalty: float
+    score_components: dict[str, float]
+    scoring_weights: dict[str, float]
+
+
+class StrategyComparison(BaseModel):
+    profit_difference_eur_ha: float
+    risk_difference: float
+    soil_benefit_difference: float
+    water_demand_difference: int
+
+
 class Money(CamelModel):
     revenue: float
     seed_cost: float
@@ -108,13 +172,10 @@ class YearMoney(CamelModel):
 
 class Economics(CamelModel):
     currency: Literal["EUR"] = "EUR"
-    # latest yield year of the market data used; null if none was used
     price_year: int | None
     area_ha: float
-    # one pass through the rotation, per hectare
     per_ha: Money
     profit_per_ha_year: float
-    # per_ha scaled to the selected area
     total: Money
     plantings: list[PlantingMoney]
     by_year: list[YearMoney]
@@ -126,25 +187,29 @@ class Strategy(CamelModel):
     summary: str
     duration_years: int
     matched_crops: list[str]
+    rotation: list[str]
+    strategy_type: StrategyType
+    ranking: int
+    score: float
     plantings: list[Planting]
     ratings: Ratings
     erosion_risk: Assessment
     water_use: WaterUse
     crop_roles: CropRoles
     market_considerations: list[str]
+    evaluation: Evaluation
+    comparison: StrategyComparison
+    explanations: list[str]
     economics: Economics
 
 
 class StrategiesResponse(CamelModel):
+    data_mode: Literal["illustrative_mock"]
+    rotations_evaluated: int
+    baseline_rotation: list[str]
+    baseline: dict[str, object]
+    assumptions: list[str]
     strategies: list[Strategy]
-
-
-def _rating(r: svc.Rating) -> Rating:
-    return Rating(score=r.score, summary=r.summary)
-
-
-def _assessment(a: svc.Assessment | svc.CropRole) -> Assessment:
-    return Assessment(level=a.importance if isinstance(a, svc.CropRole) else a.level, summary=a.summary)
 
 
 def _money(e: econ.StrategyEconomics, scale: float = 1.0) -> Money:
@@ -157,7 +222,8 @@ def _money(e: econ.StrategyEconomics, scale: float = 1.0) -> Money:
     )
 
 
-def _economics(e: econ.StrategyEconomics, area_ha: float) -> Economics:
+def _economics(strategy: dict, area_ha: float) -> Economics:
+    e = econ.strategy_economics(strategy["plantings"], strategy["duration_years"])
     return Economics(
         price_year=e.price_year,
         area_ha=round(area_ha, 2),
@@ -166,8 +232,8 @@ def _economics(e: econ.StrategyEconomics, area_ha: float) -> Economics:
         total=_money(e, area_ha),
         plantings=[
             PlantingMoney(
-                crop_name=p.planting.crop_name,
-                role=p.planting.role,
+                crop_name=p.crop_name,
+                role=p.role,
                 revenue=round(p.revenue),
                 cost=round(p.cost),
                 profit=round(p.revenue - p.cost),
@@ -182,76 +248,97 @@ def _economics(e: econ.StrategyEconomics, area_ha: float) -> Economics:
     )
 
 
-def _to_model(
-    s: svc.Strategy, matched: list[str], economics: Economics
-) -> Strategy:
-    return Strategy(
-        id=s.id,
-        name=s.name,
-        summary=s.summary,
-        duration_years=s.duration_years,
-        matched_crops=matched,
-        plantings=[
-            Planting(
-                crop_id=p.crop_id,
-                crop_name=p.crop_name,
-                role=p.role,
-                start=MonthRef(year=p.start[0], month=p.start[1]),
-                end=MonthRef(year=p.end[0], month=p.end[1]),
-                water_use_mm=p.water_use_mm,
-                traits=list(p.traits),
-                note=p.note,
-            )
-            for p in s.plantings
-        ],
-        ratings=Ratings(
-            nutrient_cycling=_rating(s.nutrient_cycling),
-            organic_matter=_rating(s.organic_matter),
-            pest_disruption=_rating(s.pest_disruption),
-            forage_potential=_rating(s.forage_potential),
-            market=_rating(s.market),
-            soil_improvement=_rating(s.soil_improvement),
-        ),
-        erosion_risk=_assessment(s.erosion_risk),
-        water_use=WaterUse(
-            level=s.water_use.level,
-            summary=s.water_use.summary,
-            by_year_mm=s.water_by_year(),
-        ),
-        crop_roles=CropRoles(
-            nitrogen_fixing=_assessment(s.nitrogen_fixing),
-            cover_crops=_assessment(s.cover_crops),
-            deep_rooting=_assessment(s.deep_rooting),
-            drought_tolerant=_assessment(s.drought_tolerant),
-        ),
-        market_considerations=list(s.market_considerations),
-        economics=economics,
-    )
+# crops page ids that differ from the mock crop ids
+CROP_ALIASES = {"dry_pea": "field_pea", "peas": "field_pea", "oats": "oat", "flax_linseed": "flax"}
+# HCAT3 code // 100 of each mock crop, for crop_soil_scores keys like "winter_barley"
+MOCK_HCAT = {
+    33010101: "wheat", 33010102: "wheat", 33010104: "barley", 33010106: "maize",
+    33010105: "oat", 33010604: "rapeseed", 33010605: "sunflower", 33011600: "soybean",
+    33010202: "chickpea", 33010206: "field_pea", 33010607: "flax", 33011502: "buckwheat",
+}
+
+
+def _to_mock_ids(crops: list[str]) -> list[str]:
+    unknown = [c for c in crops if c not in svc.CROP_BY_ID and c not in CROP_ALIASES]
+    try:
+        codes = hcat3_codes(unknown) if unknown else {}
+    except Exception:
+        log.exception("could not look up HCAT codes")
+        codes = {}
+    out = []
+    for c in crops:
+        mapped = CROP_ALIASES.get(c) or (MOCK_HCAT.get(codes[c] // 100) if c in codes else None)
+        out.append(mapped or c)
+    return list(dict.fromkeys(out))
 
 
 @router.post(
     "/strategies",
     response_model=StrategiesResponse,
     response_model_by_alias=True,
-    summary="Multi-year crop rotation strategies for an area",
+    summary="Generate and rank multi-year crop rotation strategies",
 )
 def strategies(request: StrategiesRequest) -> StrategiesResponse:
-    # TODO: use the area (soil, climate) instead of hard-coded plans
-    area_ha = request.area_ha()
-    try:
-        codes = hcat3_codes(request.crops)
-    except Exception:
-        # still matches the plans' own crop ids
-        log.exception("could not look up HCAT codes")
-        codes = {}
+    request.crops = _to_mock_ids(request.crops)
+    if request.available_crops:
+        request.available_crops = _to_mock_ids(request.available_crops)
+    preferred = list(dict.fromkeys([*request.preferred_crops, *request.crops]))
+    territory = {
+        "bounds": request.bounds.model_dump(by_alias=True) if request.bounds else None,
+        "fields": [field.model_dump(by_alias=True) for field in request.fields or []],
+        "previously_planted": request.previously_planted,
+        "preferred_crops": preferred,
+        "excluded_crops": request.excluded_crops,
+        "crop_suitability": request.crop_suitability,
+        "irrigation_available": request.irrigation_available,
+        "baseline_rotation": request.baseline_rotation or list(
+            svc.DEFAULT_BASELINE[:request.years]
+        ),
+        "strategy_weights": {
+            name: weights.model_dump(exclude_none=True)
+            for name, weights in (request.strategy_weights or {}).items()
+        },
+    }
 
+    selected_crop_ids = request.crops or request.available_crops or []
+    crop_ids = (
+        [crop_id for crop_id in selected_crop_ids if crop_id in set(request.available_crops)]
+        if request.crops and request.available_crops
+        else selected_crop_ids
+    )
+    unknown_crops = set(selected_crop_ids) - set(svc.CROP_BY_ID)
+    if unknown_crops:
+        supported_ids = ", ".join(sorted(svc.CROP_BY_ID))
+        raise HTTPException(
+            422,
+            f"Unknown selected crop id(s): {', '.join(sorted(unknown_crops))}. "
+            f"Supported mock crop IDs: {supported_ids}.",
+        )
+    try:
+        rotations = svc.generate_valid_rotations(
+            territory, crop_ids, years=request.years
+        )
+        ranked = svc.rank_rotation_strategies(rotations, territory)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    area_ha = request.area_ha()
+    if not ranked:
+        raise HTTPException(
+            422,
+            "No season-compatible rotations can be generated from the selected crops "
+            "and current suitability/irrigation constraints. Select another supported "
+            "crop or enable irrigation where appropriate.",
+        )
     return StrategiesResponse(
-        strategies=[
-            _to_model(
-                s,
-                matched,
-                _economics(econ.strategy_economics(s), area_ha),
-            )
-            for s, matched in svc.strategies_for(request.crops, codes)
-        ]
+        data_mode="illustrative_mock",
+        rotations_evaluated=len(rotations),
+        baseline_rotation=territory["baseline_rotation"],
+        baseline=svc.evaluate_baseline(territory),
+        assumptions=[
+            "Crop suitability, revenue, costs, soil benefits, risk, and water demand are illustrative mock values.",
+            "Use locally validated crop calendars and rotation-gap rules before making farm decisions.",
+            "The area is accepted for API compatibility; mock crop values are not spatially derived.",
+        ],
+        strategies=[{**s, "economics": _economics(s, area_ha)} for s in ranked],
     )

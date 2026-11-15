@@ -100,7 +100,33 @@ export async function fetchStrategies(
         body: JSON.stringify({ crops, ...area }),
         signal,
     })
-    if (!res.ok) throw new Error(`Failed to load strategies (${res.status})`)
+    if (!res.ok) {
+        let detail = ""
+        try {
+            const body = await res.json()
+            if (typeof body.detail === "string") {
+                detail = body.detail
+            } else if (Array.isArray(body.detail)) {
+                detail = body.detail
+                    .map((item: { loc?: unknown[]; msg?: string }) => {
+                        const location = Array.isArray(item.loc)
+                            ? item.loc.filter((part) => part !== "body").join(".")
+                            : ""
+                        return location
+                            ? `${location}: ${item.msg ?? "Invalid value"}`
+                            : item.msg ?? "Invalid request"
+                    })
+                    .join("; ")
+            }
+        } catch {
+            // Fall back to the HTTP status when the server does not return JSON.
+        }
+        throw new Error(
+            detail
+                ? `Failed to load strategies: ${detail}`
+                : `Failed to load strategies (${res.status})`,
+        )
+    }
     const data: { strategies: Strategy[] } = await res.json()
     return data.strategies
 }
