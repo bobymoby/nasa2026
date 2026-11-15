@@ -9,11 +9,7 @@ import {
 } from "react"
 import { Link } from "react-router"
 
-import {
-    CropsResult,
-    fetchCrops,
-    MIN_SUITABILITY,
-} from "../../api/fetchCrops"
+import { CropsResult, fetchCrops, MIN_SUITABILITY } from "../../api/fetchCrops"
 import { AreaSelection, describeSelection } from "../../data/point"
 import CropCard from "./CropCard"
 import ScoreInfo from "./ScoreInfo"
@@ -34,13 +30,28 @@ const SORTERS: Record<SortKey, (a: ListedCrop, b: ListedCrop) => number> = {
     name: (a, b) => a.name.localeCompare(b.name),
 }
 
+type PageLink = { to: string; label: string }
+
 type Props = {
     selection: AreaSelection
     selectedCrops: string[]
     onSelectedCropsChange: (ids: string[]) => void
+    title?: string
+    intro?: string
+    back?: PageLink
+    // emptyLabel lets the user continue without picking anything
+    next: PageLink & { emptyLabel?: string }
 }
 
-function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
+function CropsPage({
+    selection,
+    selectedCrops,
+    onSelectedCropsChange,
+    title = "Select crops",
+    intro,
+    back = { to: "/", label: "← Back to map" },
+    next,
+}: Props) {
     const [gaez, setGaez] = useState<CropsResult | null>(null)
     const [gaezError, setGaezError] = useState<string | null>(null)
     const [reloadKey, setReloadKey] = useState(0)
@@ -62,10 +73,7 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
         return () => controller.abort()
     }, [selection, reloadKey])
 
-    const all = useMemo(
-        () => listCrops(gaez?.crops ?? null),
-        [gaez],
-    )
+    const all = useMemo(() => listCrops(gaez?.crops ?? null), [gaez])
 
     // Drop picked crops not offered for this area after suitability loads.
     useEffect(() => {
@@ -76,9 +84,7 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
     }, [all, gaez, selectedCrops, onSelectedCropsChange])
 
     const { shown, fallback } = useMemo(() => {
-        const suited = all.filter(
-            (c) => c.gaez.suitability >= MIN_SUITABILITY,
-        )
+        const suited = all.filter((c) => c.gaez.suitability >= MIN_SUITABILITY)
         if (view === "all") {
             return { shown: all, fallback: false }
         }
@@ -164,14 +170,15 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
     return (
         <div className="crops-page">
             <header className="crops-header">
-                <Link to="/" className="crops-back">
-                    ← Back to map
+                <Link to={back.to} className="crops-back">
+                    {back.label}
                 </Link>
-                <h1>Select crops</h1>
+                <h1>{title}</h1>
                 <ScoreInfo cells={cells} />
                 <p className="crops-area">
                     Area: {describeSelection(selection)}
                 </p>
+                {intro && <p className="crops-intro">{intro}</p>}
             </header>
 
             {errors.length > 0 && (
@@ -316,9 +323,11 @@ function CropsPage({ selection, selectedCrops, onSelectedCropsChange }: Props) {
                         </button>
                     ))}
                 </div>
-                {selectedCrops.length > 0 ? (
-                    <Link to="/strategy" className="crops-next">
-                        Build strategies →
+                {selectedCrops.length > 0 || next.emptyLabel ? (
+                    <Link to={next.to} className="crops-next">
+                        {selectedCrops.length > 0
+                            ? next.label
+                            : next.emptyLabel}
                     </Link>
                 ) : (
                     <span className="crops-next disabled">

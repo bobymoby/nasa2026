@@ -109,6 +109,7 @@ STRATEGY_NAMES = {
     "risk_balanced": ("Risk-balanced", "Favors more resilient crops with lower modeled risk."),
     "water_efficient": ("Water-efficient", "Favors lower water demand and profit per water unit."),
     "balanced": ("Balanced", "Balances profit, soil benefit, risk, water efficiency, and feasibility."),
+    "current": ("Your current rotation", "The crops you grow now, in the order you plant them."),
 }
 DEFAULT_BASELINE = ("wheat", "sunflower", "barley", "chickpea", "rapeseed")
 MIN_SUITABILITY = 25.0
@@ -700,6 +701,53 @@ def rank_rotation_strategies(
         }
         strategies.append(strategy)
     return strategies
+
+
+def current_strategy(crop_ids: list[str], territory: dict[str, Any]) -> dict[str, Any] | None:
+    """The user's current rotation in the same shape as a ranked strategy.
+
+    The given order is kept when its seasons fit; otherwise the first crop
+    order that can be scheduled is used. None if no order fits.
+    """
+    if not crop_ids:
+        return None
+    frost = territory.get("frost")
+    crops = [_crop_profile(crop_id, frost) for crop_id in crop_ids]
+    sequence, schedule = next(
+        (
+            (order, schedule)
+            for order in islice(permutations(crops), MAX_ROTATIONS)
+            if (schedule := _schedule(order)) is not None
+        ),
+        (None, None),
+    )
+    if sequence is None:
+        return None
+    rotation = {
+        "crop_ids": [crop.id for crop in sequence],
+        "schedule": schedule,
+        "rotation_constraint_penalty": _rotation_constraint_penalty(
+            sequence, list(territory.get("previously_planted", ())), frost
+        ),
+    }
+    metrics = _metrics(rotation, territory)
+    metrics["water_efficiency_score"] = round(
+        100 * metrics["profit_eur_ha"] / max(metrics["water_demand_mm"], 1), 2
+    )
+    metrics["score_components"] = {}
+    metrics["scoring_weights"] = {}
+    baseline_ids = territory.get("baseline_rotation") or list(DEFAULT_BASELINE)
+    preferred = set(territory.get("preferred_crops", ()))
+    strategy = _to_legacy_shape(
+        rotation, metrics, "current", 1, 0.0,
+        sorted(preferred.intersection(rotation["crop_ids"])),
+        _baseline_metrics(baseline_ids, territory), territory,
+    )
+    if rotation["crop_ids"] != list(crop_ids):
+        strategy["explanations"].insert(
+            0, "The crops were reordered so their growing seasons fit one after another."
+        )
+    return strategy
 
 
 def _camel_key(value: str) -> str:

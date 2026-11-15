@@ -226,6 +226,53 @@ class StrategiesEndpointTests(unittest.TestCase):
         self.assertTrue(set(selected).issubset(plans[4]["rotation"]))
         self.assertGreater(len(plans[4]["rotation"]), len(selected))
 
+    def test_current_crops_come_first_in_planting_order(self):
+        response = client.post(
+            "/api/strategies",
+            json={
+                "bounds": BOUNDS,
+                "crops": ["wheat", "sunflower", "chickpea"],
+                "currentCrops": ["wheat", "maize"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        plans = response.json()["strategies"]
+        self.assertEqual(len(plans), 6)
+        current = plans[0]
+        self.assertEqual(current["strategyType"], "current")
+        self.assertEqual(current["name"], "Your current rotation")
+        self.assertEqual(current["rotation"], ["wheat", "maize"])
+        self.assertEqual(current["ranking"], 1)
+        self.assertEqual([plan["ranking"] for plan in plans], [1, 2, 3, 4, 5, 6])
+        self.assertIn("profitPerHaYear", current["economics"])
+
+    def test_current_crops_accept_crops_page_ids_and_reject_unknown(self):
+        ok = client.post(
+            "/api/strategies",
+            json={"bounds": BOUNDS, "crops": ["wheat"], "currentCrops": ["dry_pea", "oats"]},
+        )
+        self.assertEqual(ok.status_code, 200, ok.text)
+        self.assertEqual(
+            set(ok.json()["strategies"][0]["rotation"]), {"field_pea", "oat"}
+        )
+
+        bad = client.post(
+            "/api/strategies",
+            json={"bounds": BOUNDS, "crops": ["wheat"], "currentCrops": ["banana"]},
+        )
+        self.assertEqual(bad.status_code, 422)
+        self.assertIn("banana", bad.json()["detail"])
+
+    def test_without_current_crops_no_current_strategy(self):
+        response = client.post(
+            "/api/strategies", json={"bounds": BOUNDS, "crops": ["wheat", "barley"]}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertNotIn(
+            "current", {plan["strategyType"] for plan in response.json()["strategies"]}
+        )
+
     def test_objectives_diversify_repeated_selected_crops(self):
         selected = ["flax", "oat", "rye", "sorghum"]
         response = client.post(

@@ -18,8 +18,11 @@ DEFAULT_COUNTRY = "BG"
 
 router = APIRouter(tags=["strategies"])
 
-StrategyType = Literal[
+WeightedStrategyType = Literal[
     "profit_first", "soil_builder", "risk_balanced", "water_efficient", "balanced"
+]
+StrategyType = Literal[
+    "current", "profit_first", "soil_builder", "risk_balanced", "water_efficient", "balanced"
 ]
 
 
@@ -42,6 +45,11 @@ class StrategyWeights(CamelModel):
 class StrategiesRequest(CamelModel):
     # ``crops`` is the set the user selected in the existing strategy-page client.
     crops: list[str] = Field(default_factory=list, max_length=50)
+    current_crops: list[str] = Field(
+        default_factory=list,
+        max_length=8,
+        description="Crops grown now, in planting order; returned first as the current rotation.",
+    )
     bounds: Bounds | None = None
     fields: list[SelectedField] | None = Field(default=None, min_length=1, max_length=10_000)
     years: int = Field(default=3, ge=2, le=5)
@@ -55,7 +63,7 @@ class StrategiesRequest(CamelModel):
     )
     irrigation_available: bool = False
     baseline_rotation: list[str] | None = Field(default=None, min_length=2, max_length=5)
-    strategy_weights: dict[StrategyType, StrategyWeights] | None = None
+    strategy_weights: dict[WeightedStrategyType, StrategyWeights] | None = None
     site_context: dict[str, Any] | None = None
     context_warnings: list[str] = Field(default_factory=list, max_length=20)
 
@@ -500,6 +508,7 @@ def _to_mock_ids(crops: list[str]) -> list[str]:
 )
 def strategies(request: StrategiesRequest) -> StrategiesResponse:
     request.crops = _to_mock_ids(request.crops)
+    request.current_crops = _to_mock_ids(request.current_crops)
     if request.available_crops:
         request.available_crops = _to_mock_ids(request.available_crops)
     preferred = list(dict.fromkeys([*request.preferred_crops, *request.crops]))
@@ -541,7 +550,7 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
 
     selected_crop_ids = list(dict.fromkeys(request.crops or request.available_crops or []))
     crop_ids = selected_crop_ids
-    unknown_crops = set(selected_crop_ids) - set(svc.CROP_BY_ID)
+    unknown_crops = set(selected_crop_ids + request.current_crops) - set(svc.CROP_BY_ID)
     if unknown_crops:
         supported_ids = ", ".join(sorted(svc.CROP_BY_ID))
         raise HTTPException(
@@ -588,7 +597,12 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
             territory,
             strategy_types=["balanced"],
         )
-        ranked = [*selected_strategies, *balanced_strategy]
+        current = svc.current_strategy(request.current_crops, territory)
+        if request.current_crops and current is None:
+            data_warnings.append(
+                "Your current crops could not be scheduled as one rotation, so it is not shown."
+            )
+        ranked = [*([current] if current else []), *selected_strategies, *balanced_strategy]
         for ranking, strategy in enumerate(ranked, start=1):
             strategy["ranking"] = ranking
     except ValueError as exc:

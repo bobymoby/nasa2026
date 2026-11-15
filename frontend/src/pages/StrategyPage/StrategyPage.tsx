@@ -26,6 +26,7 @@ import {
 type Props = {
     selection: AreaSelection
     crops: string[]
+    currentCrops: string[]
 }
 
 const RATINGS: { key: keyof Strategy["ratings"]; label: string }[] = [
@@ -138,7 +139,10 @@ function StrategyDetail({
 
             <section>
                 <h3>Rotation risks</h3>
-                <RotationRisksSection state={risk} plantings={strategy.plantings} />
+                <RotationRisksSection
+                    state={risk}
+                    plantings={strategy.plantings}
+                />
             </section>
 
             <section>
@@ -288,11 +292,12 @@ function ComparisonTable({
     )
 }
 
-function StrategyPage({ selection, crops }: Props) {
+function StrategyPage({ selection, crops, currentCrops }: Props) {
     const [strategies, setStrategies] = useState<Strategy[] | null>(null)
-    const [strategySources, setStrategySources] = useState<
-        Pick<StrategiesResult, "dataMode" | "assumptions"> | null
-    >(null)
+    const [strategySources, setStrategySources] = useState<Pick<
+        StrategiesResult,
+        "dataMode" | "assumptions"
+    > | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [reloadKey, setReloadKey] = useState(0)
     const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -304,7 +309,7 @@ function StrategyPage({ selection, crops }: Props) {
         setStrategySources(null)
         setError(null)
 
-        fetchStrategies(selection, crops, controller.signal)
+        fetchStrategies(selection, crops, currentCrops, controller.signal)
             .then((result) => {
                 setStrategies(result.strategies)
                 setStrategySources({
@@ -323,7 +328,7 @@ function StrategyPage({ selection, crops }: Props) {
             })
 
         return () => controller.abort()
-    }, [selection, crops, reloadKey])
+    }, [selection, crops, currentCrops, reloadKey])
 
     // check every strategy's planting order once; strategies with the same
     // order share one request
@@ -337,7 +342,10 @@ function StrategyPage({ selection, crops }: Props) {
         }
         setRisks(
             Object.fromEntries(
-                strategies.map((s) => [s.id, { status: "loading" } as RiskState]),
+                strategies.map((s) => [
+                    s.id,
+                    { status: "loading" } as RiskState,
+                ]),
             ),
         )
         bySequence.forEach((ids, key) => {
@@ -370,8 +378,8 @@ function StrategyPage({ selection, crops }: Props) {
 
     return (
         <div className="strategy-page">
-            <Link to="/crops" className="strategy-back">
-                ← Back to crops
+            <Link to="/current" className="strategy-back">
+                ← Back to current rotation
             </Link>
             <h1 className="strategy-title">Rotation strategies</h1>
             <p className="strategy-lead">
@@ -430,10 +438,17 @@ function StrategyPage({ selection, crops }: Props) {
                                 type="button"
                                 role="tab"
                                 aria-selected={s.id === selectedId}
-                                className={`strategy-option${s.id === selectedId ? " selected" : ""}`}
+                                className={`strategy-option${s.id === selectedId ? " selected" : ""}${s.strategyType === "current" ? " current" : ""}`}
                                 onClick={() => setSelectedId(s.id)}
                             >
-                                <span className="option-name">{s.name}</span>
+                                <span className="option-name">
+                                    {s.name}
+                                    {s.strategyType === "current" && (
+                                        <span className="option-current">
+                                            Now
+                                        </span>
+                                    )}
+                                </span>
                                 <span className="option-meta">
                                     {s.durationYears} years · avg{" "}
                                     {averageScore(s).toFixed(1)}/5
@@ -450,10 +465,14 @@ function StrategyPage({ selection, crops }: Props) {
                                 <span
                                     className={`option-match${s.matchedCrops.length ? "" : " none"}`}
                                 >
-                                    {s.matchedCrops.length
-                                        ? `Uses ${s.matchedCrops.map(humanize).join(", ")}`
-                                        : "Uses none of your crops"}
-                                    {" · "}
+                                    {s.strategyType !== "current" && (
+                                        <>
+                                            {s.matchedCrops.length
+                                                ? `Uses ${s.matchedCrops.map(humanize).join(", ")}`
+                                                : "Uses none of your crops"}
+                                            {" · "}
+                                        </>
+                                    )}
                                     {s.rotation.map(humanize).join(" → ")}
                                 </span>
                             </button>
@@ -461,7 +480,10 @@ function StrategyPage({ selection, crops }: Props) {
                     </div>
 
                     {selected && (
-                        <StrategyDetail strategy={selected} risk={risks[selected.id]} />
+                        <StrategyDetail
+                            strategy={selected}
+                            risk={risks[selected.id]}
+                        />
                     )}
 
                     <section className="comparison-section">

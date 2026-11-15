@@ -213,9 +213,25 @@ $status: (
 }
 
 .option-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-size: 14px;
     font-weight: 600;
     line-height: 1.3;
+}
+
+.strategy-option.current:not(.selected) {
+    border-style: dashed;
+}
+
+.option-current {
+    padding: 1px 7px;
+    border-radius: $radius-pill;
+    background-color: #f1f5f9;
+    color: $page-muted;
+    font-size: 11px;
+    font-weight: 600;
 }
 
 .option-meta {
