@@ -7,9 +7,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.routers.crops import Bounds, CamelModel, SelectedField
 from app.services import strategies as svc
 from app.services import strategy_economics as econ
+from app.services.country import country_at
+from app.services.prices.pipeline import Market, market_reference
 from app.services.crop_soil_scores import hcat3_codes
 
 log = logging.getLogger(__name__)
+
+DEFAULT_COUNTRY = "BG"
 
 router = APIRouter(tags=["strategies"])
 
@@ -67,6 +71,13 @@ class StrategiesRequest(CamelModel):
         if self.baseline_rotation and len(self.baseline_rotation) != self.years:
             raise ValueError("baselineRotation must contain one crop per rotation year")
         return self
+
+    def centre(self) -> tuple[float, float]:
+        if self.bounds:
+            tl, br = self.bounds.top_left, self.bounds.bottom_right
+            return (tl.lat + br.lat) / 2, (tl.lng + br.lng) / 2
+        ring = self.fields[0].polygon
+        return sum(p.lat for p in ring) / len(ring), sum(p.lng for p in ring) / len(ring)
 
     def area_ha(self) -> float:
         if self.bounds:
@@ -157,6 +168,8 @@ class Money(CamelModel):
 class PlantingMoney(CamelModel):
     crop_name: str
     role: Literal["cash", "cover", "forage"]
+    yield_t_ha: float | None
+    price_eur_t: float | None
     revenue: float
     cost: float
     profit: float
@@ -172,7 +185,10 @@ class YearMoney(CamelModel):
 
 class Economics(CamelModel):
     currency: Literal["EUR"] = "EUR"
+    country: str
     price_year: int | None
+    complete: bool
+    missing_data: list[str]
     area_ha: float
     per_ha: Money
     profit_per_ha_year: float
@@ -222,10 +238,25 @@ def _money(e: econ.StrategyEconomics, scale: float = 1.0) -> Money:
     )
 
 
-def _economics(strategy: dict, area_ha: float) -> Economics:
-    e = econ.strategy_economics(strategy["plantings"], strategy["duration_years"])
+def _market(request: StrategiesRequest) -> Market:
+    country = country_at(*request.centre())
+    if country is None:
+        log.info("strategies: no country at %s, using %s", request.centre(), DEFAULT_COUNTRY)
+        country = DEFAULT_COUNTRY
+    try:
+        return market_reference(country, [econ.market_id(c) for c in svc.CROP_BY_ID])
+    except Exception:
+        log.exception("strategies: market data for %s unavailable", country)
+        return Market(country, None, {})
+
+
+def _economics(strategy: dict, area_ha: float, market: Market) -> Economics:
+    e = econ.strategy_economics(strategy["plantings"], strategy["duration_years"], market)
     return Economics(
+        country=e.country,
         price_year=e.price_year,
+        complete=e.complete,
+        missing_data=e.missing_data,
         area_ha=round(area_ha, 2),
         per_ha=_money(e),
         profit_per_ha_year=round(e.profit / e.years),
@@ -234,6 +265,8 @@ def _economics(strategy: dict, area_ha: float) -> Economics:
             PlantingMoney(
                 crop_name=p.crop_name,
                 role=p.role,
+                yield_t_ha=p.yield_t_ha,
+                price_eur_t=p.price_eur_t,
                 revenue=round(p.revenue),
                 cost=round(p.cost),
                 profit=round(p.revenue - p.cost),
@@ -283,6 +316,7 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
     if request.available_crops:
         request.available_crops = _to_mock_ids(request.available_crops)
     preferred = list(dict.fromkeys([*request.preferred_crops, *request.crops]))
+    market = _market(request)
     territory = {
         "bounds": request.bounds.model_dump(by_alias=True) if request.bounds else None,
         "fields": [field.model_dump(by_alias=True) for field in request.fields or []],
@@ -292,6 +326,7 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
         "crop_suitability": request.crop_suitability,
         "irrigation_available": request.irrigation_available,
         "baseline_rotation": request.baseline_rotation or list(svc.DEFAULT_BASELINE),
+        "crop_profit_eur_ha": {c: econ.crop_profit_eur_ha(c, market) for c in svc.CROP_BY_ID},
         "strategy_weights": {
             name: weights.model_dump(exclude_none=True)
             for name, weights in (request.strategy_weights or {}).items()
@@ -363,11 +398,14 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
         baseline_rotation=territory["baseline_rotation"],
         baseline=svc.evaluate_baseline(territory),
         assumptions=[
-            "Crop suitability, revenue, costs, soil benefits, risk, and water demand are illustrative mock values.",
+            "Revenue is the national 5-year mean yield times the 5-year mean market price "
+            f"({market.country}, Eurostat or FAOSTAT, in {market.price_year or 'current'} euros); "
+            "crops without published figures or a cost estimate are left out of the totals and flagged.",
+            "Seed and operating costs, crop suitability, soil benefits, risk, and water demand are illustrative estimates.",
             "Use locally validated crop calendars and rotation-gap rules before making farm decisions.",
             "The first four strategies include every selected crop; the balanced strategy may add another crop.",
             "Rotation length expands when needed to include every selected crop.",
             "The area is accepted for API compatibility; mock crop values are not spatially derived.",
         ],
-        strategies=[{**s, "economics": _economics(s, area_ha)} for s in ranked],
+        strategies=[{**s, "economics": _economics(s, area_ha, market)} for s in ranked],
     )

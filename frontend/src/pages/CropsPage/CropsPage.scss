@@ -188,11 +188,11 @@ $grid-gap: 12px; // GRID_GAP in CropsPage.tsx
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    flex-wrap: wrap;
 }
 
 .crops-count {
-    margin: 0;
+    flex: none;
+    margin: 0 4px 0 0;
     font-size: 13px;
     font-weight: 500;
 }
@@ -394,39 +394,6 @@ $soil-bad-text: #b91c1c;
     margin-top: 12px;
 }
 
-.crops-view {
-    display: flex;
-    gap: 2px;
-    padding: 3px;
-    border: 1px solid $page-border;
-    border-radius: $radius-pill;
-    background-color: $page-card;
-    box-shadow: $shadow-light;
-
-    button {
-        @include button-reset;
-        @include focus-ring($accent);
-        padding: 7px 14px;
-        border-radius: $radius-pill;
-        font-size: 13px;
-        font-weight: 500;
-        color: $page-muted;
-        white-space: nowrap;
-        transition:
-            background-color $transition,
-            color $transition;
-
-        &:hover {
-            color: $page-text;
-        }
-
-        &.active {
-            background-color: $accent;
-            color: #fff;
-        }
-    }
-}
-
 .crops-search {
     flex: 1;
     min-width: 220px;
@@ -483,11 +450,19 @@ $soil-bad-text: #b91c1c;
     }
 }
 
+// one row that scrolls sideways, so picking crops never changes the footer height
 .crops-selected {
+    @include thin-scrollbar;
+    flex: 1;
+    min-width: 0;
     display: flex;
-    flex-wrap: wrap;
+    align-items: center;
     gap: 6px;
-    margin-top: 10px;
+    overflow-x: auto;
+
+    .crops-chip {
+        flex: none;
+    }
 }
 
 .crops-chip {
@@ -528,31 +503,74 @@ $soil-bad-text: #b91c1c;
 }
 
 .crops-info {
-    padding: 3px 10px;
-    border-radius: $radius-pill;
-    border: 1px dashed $page-border;
-    color: $page-muted;
-    font-size: 12px;
-    cursor: help;
+    position: relative;
 
-    &::before {
-        content: "i";
-        display: inline-grid;
-        place-items: center;
-        width: 14px;
-        height: 14px;
-        margin-right: 6px;
-        border-radius: 50%;
-        background-color: $page-muted;
-        color: #fff;
-        font-size: 10px;
-        font-weight: 700;
-        font-style: italic;
+    > button {
+        @include button-reset;
+        @include focus-ring($accent);
+        display: inline-flex;
+        align-items: center;
+        padding: 3px 10px;
+        border-radius: $radius-pill;
+        border: 1px dashed $page-border;
+        color: $page-muted;
+        font-size: 12px;
+        transition:
+            border-color $transition,
+            color $transition;
+
+        &::before {
+            content: "i";
+            display: inline-grid;
+            place-items: center;
+            width: 14px;
+            height: 14px;
+            margin-right: 6px;
+            border-radius: 50%;
+            background-color: currentColor;
+            color: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            font-style: italic;
+        }
+
+        &:hover,
+        &[aria-expanded="true"] {
+            border-color: $accent;
+            color: $page-text;
+        }
+    }
+}
+
+.crops-info-popover {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    z-index: 10;
+    width: min(360px, calc(100vw - 32px));
+    padding: 14px 16px;
+    border: 1px solid $page-border;
+    border-radius: $radius;
+    background-color: $page-card;
+    box-shadow: $shadow;
+    color: $page-text;
+    font-size: 13px;
+    line-height: 1.5;
+    animation: panel-in 140ms $ease;
+
+    h4 {
+        margin: 0 0 4px;
+        font-size: 13px;
+        font-weight: 600;
     }
 
-    &:focus-visible {
-        outline: 2px solid $accent;
-        outline-offset: 2px;
+    p {
+        margin: 0;
+        color: $page-muted;
+    }
+
+    p + h4 {
+        margin-top: 12px;
     }
 }
 
@@ -587,6 +605,16 @@ $soil-bad-text: #b91c1c;
             cursor: default;
         }
     }
+}
+
+.crops-fallback {
+    margin: 10px 0 0;
+    padding: 8px 12px;
+    border-radius: $radius-sm;
+    border: 1px solid #fde68a;
+    background-color: #fffbeb;
+    color: #92400e;
+    font-size: 13px;
 }
 
 .crops-loading {

@@ -1,4 +1,4 @@
-"""Raw price inputs: Eurostat crop prices, FX and HICP, and the FAOSTAT bulk file."""
+"""Raw inputs: Eurostat crop prices, yields, FX and HICP, and the FAOSTAT price and production bulk files."""
 
 import csv
 import io
@@ -14,6 +14,12 @@ EUROSTAT_PRICES = "apri_ap_crpouta"
 EUROSTAT_FX = "ert_bil_eur_a"
 EUROSTAT_HICP = "prc_hicp_aind"
 FAOSTAT_BULK = "https://bulks-faostat.fao.org/production/Prices_E_All_Data_(Normalized).zip"
+EUROSTAT_YIELDS = "apro_cpsh1"
+EUROSTAT_YIELD_MEASURE = "YLD_HUMD_EU_T_HA"
+FAOSTAT_YIELD_BULK = "https://bulks-faostat.fao.org/production/Production_Crops_Livestock_E_All_Data_(Normalized).zip"
+FAO_YIELD = "5412"
+FAO_YIELD_T_PER_UNIT = {"kg/ha": 0.001, "100 g/ha": 0.0001, "hg/ha": 0.0001}
+FAO_YIELD_SINCE = 2000
 FAO_USD_PER_TONNE = "5532"
 FAO_ANNUAL = "7021"
 TIMEOUT = httpx.Timeout(30, read=120)
@@ -42,6 +48,23 @@ class FaoPrice:
     item_code: int
     year: int
     usd_per_t: float
+    flag: str
+
+
+@dataclass(frozen=True)
+class EurostatYield:
+    crops: str
+    year: int
+    t_ha: float
+    flag: str | None
+
+
+@dataclass(frozen=True)
+class FaoYield:
+    m49: int
+    item_code: int
+    year: int
+    t_ha: float
     flag: str
 
 
@@ -108,6 +131,26 @@ def fetch_eurostat_prices(geo: str, prod_codes: Iterable[str]) -> list[EurostatP
     return parse_eurostat_prices(data)
 
 
+def parse_eurostat_yields(data: dict) -> list[EurostatYield]:
+    return [
+        EurostatYield(cell["crops"], int(cell["time"]), value, flag)
+        for cell, value, flag in jsonstat_cells(data)
+        if value > 0
+    ]
+
+
+def fetch_eurostat_yields(geo: str, crop_codes: Iterable[str]) -> list[EurostatYield]:
+    params = [("geo", geo), ("strucpro", EUROSTAT_YIELD_MEASURE), ("lang", "EN")]
+    params += [("crops", code) for code in sorted(set(crop_codes))]
+    try:
+        data = _get_json(f"{EUROSTAT_API}/{EUROSTAT_YIELDS}", params)
+    except PriceSourceError as e:
+        if e.status in NO_DATA_STATUSES:
+            return []
+        raise
+    return parse_eurostat_yields(data)
+
+
 def _yearly(data: dict, key_dim: str | None = None) -> dict[str, dict[int, float]]:
     out: dict[str, dict[int, float]] = {}
     for cell, value, _ in jsonstat_cells(data):
@@ -147,13 +190,42 @@ def parse_fao_bulk(lines: Iterable[str], item_codes: set[int]) -> list[FaoPrice]
     return out
 
 
-def fetch_fao_bulk(item_codes: set[int]) -> list[FaoPrice]:
+def parse_fao_yields(lines: Iterable[str], item_codes: set[int]) -> list[FaoYield]:
+    rows = csv.reader(lines)
+    col = {name: i for i, name in enumerate(next(rows))}
+    element, item_col, area, year_col = col["Element Code"], col["Item Code"], col["Area Code (M49)"], col["Year"]
+    unit, value_col, flag = col["Unit"], col["Value"], col["Flag"]
+    wanted = {str(code) for code in item_codes}
+    out = []
+    for row in rows:
+        if row[element] != FAO_YIELD or row[item_col] not in wanted or not row[value_col]:
+            continue
+        year = int(row[year_col])
+        scale = FAO_YIELD_T_PER_UNIT.get(row[unit])
+        m49 = row[area].lstrip("'")
+        if year < FAO_YIELD_SINCE or scale is None or not m49.isdigit():
+            continue
+        t_ha = float(row[value_col]) * scale
+        if t_ha > 0:
+            out.append(FaoYield(int(m49), int(row[item_col]), year, round(t_ha, 4), row[flag]))
+    return out
+
+
+def _bulk_csv(url: str, label: str, parse):
     try:
-        r = httpx.get(FAOSTAT_BULK, timeout=httpx.Timeout(30, read=300), follow_redirects=True)
+        r = httpx.get(url, timeout=httpx.Timeout(30, read=300), follow_redirects=True)
         r.raise_for_status()
     except httpx.HTTPError as e:
-        raise PriceSourceError(f"FAOSTAT bulk download failed: {e}") from e
+        raise PriceSourceError(f"{label} download failed: {e}") from e
     with zipfile.ZipFile(io.BytesIO(r.content)) as z:
         name = next(n for n in z.namelist() if "All_Data" in n and n.endswith(".csv"))
         with z.open(name) as raw:
-            return parse_fao_bulk(io.TextIOWrapper(raw, encoding="latin-1", newline=""), item_codes)
+            return parse(io.TextIOWrapper(raw, encoding="latin-1", newline=""))
+
+
+def fetch_fao_bulk(item_codes: set[int]) -> list[FaoPrice]:
+    return _bulk_csv(FAOSTAT_BULK, "FAOSTAT bulk", lambda lines: parse_fao_bulk(lines, item_codes))
+
+
+def fetch_fao_yields(item_codes: set[int]) -> list[FaoYield]:
+    return _bulk_csv(FAOSTAT_YIELD_BULK, "FAOSTAT production bulk", lambda lines: parse_fao_yields(lines, item_codes))
