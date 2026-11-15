@@ -69,7 +69,7 @@ export type Economics = {
 export type Strategy = {
     id: string
     strategyType:
-        | "current"
+        | "planned"
         | "profit_first"
         | "soil_builder"
         | "risk_balanced"
@@ -132,7 +132,10 @@ export async function fetchPlannableCrops(
     return data.crops
 }
 
-function normalizeEconomics(economics: Economics, durationYears: number): Economics {
+function normalizeEconomics(
+    economics: Economics,
+    durationYears: number,
+): Economics {
     const perHa = economics.perHa ?? {
         revenue: economics.revenuePerHa ?? 0,
         seedCost: 0,
@@ -159,18 +162,18 @@ function normalizeEconomics(economics: Economics, durationYears: number): Econom
     }
 }
 
-// currentCrops (planting order) come back first as the "current" strategy
+// plannedCrops (planting order) come back first as the "planned" strategy
 export async function fetchStrategies(
     selection: AreaSelection,
     crops: string[],
-    currentCrops: string[],
+    plannedCrops: string[],
     signal?: AbortSignal,
 ): Promise<StrategiesResult> {
     const area = areaBody(selection)
     const res = await fetch(`${API_URL}/api/strategies`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ crops, currentCrops, ...area }),
+        body: JSON.stringify({ crops, plannedCrops, ...area }),
         signal,
     })
     if (!res.ok) {
@@ -207,7 +210,10 @@ export async function fetchStrategies(
         ...data,
         strategies: data.strategies.map((strategy) => ({
             ...strategy,
-            economics: normalizeEconomics(strategy.economics, strategy.durationYears),
+            economics: normalizeEconomics(
+                strategy.economics,
+                strategy.durationYears,
+            ),
         })),
     }
 }

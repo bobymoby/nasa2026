@@ -25,7 +25,7 @@ WeightedStrategyType = Literal[
     "profit_first", "soil_builder", "risk_balanced", "water_efficient", "balanced"
 ]
 StrategyType = Literal[
-    "current", "profit_first", "soil_builder", "risk_balanced", "water_efficient", "balanced"
+    "planned", "profit_first", "soil_builder", "risk_balanced", "water_efficient", "balanced"
 ]
 
 
@@ -93,10 +93,13 @@ class AreaRequest(CamelModel):
 class StrategiesRequest(AreaRequest):
     # ``crops`` is the set the user selected in the existing strategy-page client.
     crops: list[str] = Field(default_factory=list, max_length=50)
-    current_crops: list[str] = Field(
+    planned_crops: list[str] = Field(
         default_factory=list,
         max_length=8,
-        description="Crops grown now, in planting order; returned first as the current rotation.",
+        description=(
+            "Planned crops in planting order; returned first as the planned rotation and "
+            "used as the baseline unless baselineRotation is given."
+        ),
     )
     years: int = Field(default=3, ge=2, le=5)
     available_crops: list[str] | None = Field(default=None, min_length=1, max_length=8)
@@ -370,7 +373,7 @@ def plannable_crops(request: AreaRequest) -> PlannableCrops:
 )
 def strategies(request: StrategiesRequest) -> StrategiesResponse:
     request.crops = _to_mock_ids(request.crops)
-    request.current_crops = _to_mock_ids(request.current_crops)
+    request.planned_crops = _to_mock_ids(request.planned_crops)
     if request.available_crops:
         request.available_crops = _to_mock_ids(request.available_crops)
     preferred = list(dict.fromkeys([*request.preferred_crops, *request.crops]))
@@ -394,7 +397,9 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
         },
         "price_cv": {c: m.price_cv for c, m in crop_markets.items() if m and m.price_cv is not None},
         "irrigation_available": request.irrigation_available,
-        "baseline_rotation": request.baseline_rotation or list(svc.DEFAULT_BASELINE),
+        "baseline_rotation": (
+            request.baseline_rotation or request.planned_crops or list(svc.DEFAULT_BASELINE)
+        ),
         "crop_profit_eur_ha": {c: econ.crop_profit_eur_ha(c, market) for c in svc.CROP_BY_ID},
         "strategy_weights": {
             name: weights.model_dump(exclude_none=True)
@@ -404,7 +409,7 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
 
     selected_crop_ids = list(dict.fromkeys(request.crops or request.available_crops or []))
     crop_ids = selected_crop_ids
-    unknown_crops = set(selected_crop_ids + request.current_crops) - set(svc.CROP_BY_ID)
+    unknown_crops = set(selected_crop_ids + request.planned_crops) - set(svc.CROP_BY_ID)
     if unknown_crops:
         supported_ids = ", ".join(sorted(svc.CROP_BY_ID))
         raise HTTPException(
@@ -425,11 +430,13 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
     ]
     try:
         ranked, rotations_evaluated = svc.build_strategies(territory, crop_ids, effective_years)
-        current = svc.current_strategy(request.current_crops, territory)
+        planned = svc.planned_strategy(
+            request.planned_crops, territory, is_baseline=not request.baseline_rotation
+        )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    if current:
-        ranked.insert(0, current)
+    if planned:
+        ranked.insert(0, planned)
     for ranking, strategy in enumerate(ranked, start=1):
         strategy["ranking"] = ranking
 
@@ -465,9 +472,17 @@ def strategies(request: StrategiesRequest) -> StrategiesResponse:
             "Rotations run one year longer than the number of selected crops (at most 5 years), "
             "leaving room for a goal-specific crop.",
             *(
-                ["Your current crops could not be scheduled as one rotation, so it is not shown."]
-                if request.current_crops and not current
+                ["Your planned crops could not be scheduled as one rotation, so it is not shown."]
+                if request.planned_crops and not planned
                 else []
+            ),
+            "Every strategy is compared with a baseline: "
+            + (
+                "the rotation you supplied."
+                if request.baseline_rotation
+                else "your planned rotation, repeated to the same length."
+                if request.planned_crops
+                else "a typical regional rotation."
             ),
             *site.warnings,
         ],

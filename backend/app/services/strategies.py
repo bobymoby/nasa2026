@@ -137,7 +137,10 @@ STRATEGY_PROFILES: dict[str, dict[str, float]] = {
     },
 }
 STRATEGY_NAMES = {
-    "current": ("Your current rotation", "What you grow now, for comparison."),
+    "planned": (
+        "Planned rotation",
+        "The rotation you plan to grow; it is the baseline the other strategies are compared with.",
+    ),
     "profit_first": ("Profit-focused", "Prioritizes estimated rotation profit."),
     "soil_builder": ("Soil-building", "Prioritizes the humus balance: legumes and cover crops."),
     "risk_balanced": ("Risk-balanced", "Favors crops whose national yields and prices vary least."),
@@ -521,11 +524,14 @@ def _baseline_metrics(baseline: list[str], territory: dict[str, Any]) -> dict[st
     return metrics
 
 
-def current_strategy(crop_ids: list[str], territory: dict[str, Any]) -> dict[str, Any] | None:
-    """The farmer's current rotation in the same shape as a ranked strategy.
+def planned_strategy(
+    crop_ids: list[str], territory: dict[str, Any], is_baseline: bool = False
+) -> dict[str, Any] | None:
+    """The farmer's planned rotation in the same shape as a ranked strategy.
 
     The given order is kept when its seasons fit; otherwise the first crop
-    order that can be scheduled is used. None if no order fits.
+    order that can be scheduled is used. None if no order fits. When the plan
+    is itself the baseline, it is compared with itself.
     """
     if not crop_ids:
         return None
@@ -557,9 +563,9 @@ def current_strategy(crop_ids: list[str], territory: dict[str, Any]) -> dict[str
     baseline_ids = territory.get("baseline_rotation") or list(DEFAULT_BASELINE)
     preferred = set(territory.get("preferred_crops", ()))
     strategy = _to_legacy_shape(
-        rotation, metrics, "current", 1, 0.0,
+        rotation, metrics, "planned", 1, 0.0,
         sorted(preferred.intersection(rotation["crop_ids"])), [],
-        _baseline_metrics(baseline_ids, territory), territory,
+        metrics if is_baseline else _baseline_metrics(baseline_ids, territory), territory,
     )
     if rotation["crop_ids"] != list(crop_ids):
         strategy["explanations"].insert(
