@@ -1,0 +1,10 @@
+scheme,name,intervention,eur_per_ha,basis,crops,band_from_ha,band_to_ha,max_farm_ha,claim_year,assumption
+biss,Basic income support (BISS),I.А.1-1,101.90,area,,0,,,2024,
+criss,Redistributive support (CRISS),I.А.2.-1,118.53,area,,0,30,600,2024,
+protein,Coupled support for protein crops,I.Б.19-1,130.28,crop,field_pea|chickpea|soybean,0,,,2024,Grain legumes are assumed to be the eligible protein crops.
+vegetables,"Coupled support for carrots, cabbage and melons",I.Б.15-1,442.74,crop,carrot,0,30,,2024,
+vegetables,"Coupled support for carrots, cabbage and melons",I.Б.15-2,380.89,crop,carrot,30,,,2024,The lower rate is assumed to apply to the hectares above 30.
+eco_soil,Eco-scheme 03: soil potential (green manure),I.B.3_Еко-03,20.00,cover_crop,,0,,,2024,A cover crop is assumed to qualify as green manure; the scheme also requires a nutrient plan and at most 150 kg N/ha.
+eco_diversity,Eco-scheme 08: crop diversification,I.B.8_Еко-08_01,34.56,diversification,,0,10,,2024,At least 3 different main crops are assumed to qualify; the rates are assumed to apply per band of hectares.
+eco_diversity,Eco-scheme 08: crop diversification,I.B.8_Еко-08_02,26.64,diversification,,10,30,,2024,At least 3 different main crops are assumed to qualify; the rates are assumed to apply per band of hectares.
+eco_diversity,Eco-scheme 08: crop diversification,I.B.8_Еко-08_03,14.12,diversification,,30,,,2024,At least 3 different main crops are assumed to qualify; the rates are assumed to apply per band of hectares.

@@ -162,15 +162,22 @@ class StrategiesEndpointTests(unittest.TestCase):
         }
         self.assertEqual(covers["profit_first"], [])
         self.assertEqual(covers["water_efficient"], [])
-        self.assertTrue(covers["soil_builder"])
-        self.assertTrue(all(p["cropId"] not in plans["soil_builder"]["rotation"] for p in covers["soil_builder"]))
-        cover_names = {p["cropName"] for p in covers["soil_builder"]}
-        self.assertTrue(any(name in e for e in plans["soil_builder"]["explanations"] for name in cover_names))
+        with_covers = [name for name, found in covers.items() if found]
+        self.assertTrue(with_covers)
+        self.assertTrue(set(with_covers) <= {"soil_builder", "risk_balanced", "balanced"})
+        for name in with_covers:
+            self.assertTrue(all(p["cropId"] not in plans[name]["rotation"] for p in covers[name]))
+            cover_names = {p["cropName"] for p in covers[name]}
+            self.assertTrue(any(c in e for e in plans[name]["explanations"] for c in cover_names))
+            self.assertEqual(
+                {p["source"] for p in plans[name]["economics"]["plantings"] if p["role"] == "cover"},
+                {"no harvest"},
+            )
+            self.assertIn(
+                "Eco-scheme 03: soil potential (green manure)",
+                {line["name"] for line in plans[name]["economics"]["capPayments"]},
+            )
         self.assertIn("No cover crops", " ".join(plans["profit_first"]["explanations"]))
-        self.assertEqual(
-            {p["source"] for p in plans["soil_builder"]["economics"]["plantings"] if p["role"] == "cover"},
-            {"no harvest"},
-        )
 
     def test_supports_oat_flax_and_buckwheat_from_crop_suitability(self):
         selected = ["oat", "flax", "buckwheat"]

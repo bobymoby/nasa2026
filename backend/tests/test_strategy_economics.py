@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.routers import strategies as router
+from app.services import cap_payments as cap
 from app.services import strategy_economics as econ
 from app.services.prices.pipeline import CropMarket, Market
 from app.services.strategies import CROP_BY_ID
@@ -111,9 +112,13 @@ class StrategiesMoneyTests(unittest.TestCase):
         for row in money["plantings"]:
             self.assertEqual(row["revenue"], round(row["yieldTHa"] * row["priceEurT"]))
         self.assertTrue(all("mock" not in r["source"] for p in plans for r in p["economics"]["plantings"]))
-        self.assertEqual(
+        area = money["areaHa"]
+        rotation = profit_first["rotation"]
+        self.assertAlmostEqual(
             profit_first["evaluation"]["profitEurHa"],
-            round(sum(econ.crop_profit_eur_ha(c, market) for c in profit_first["rotation"]), 2),
+            sum(econ.crop_profit_eur_ha(c, market) + cap.crop_payment_eur_ha(c, area) for c in rotation)
+            + profit_first["durationYears"] * cap.diversification_eur_ha_year(rotation, area),
+            delta=1,
         )
 
     def test_market_failure_still_answers_with_flagged_economics(self):
@@ -128,6 +133,54 @@ class StrategiesMoneyTests(unittest.TestCase):
         self.assertIsNone(money["priceYear"])
         self.assertTrue(all(r["source"] == econ.NO_MARKET_DATA for r in money["plantings"]))
         self.assertEqual(money["perHa"]["profit"], 0)
+
+
+class CapPaymentTests(unittest.TestCase):
+    PLAN = [
+        {"crop_id": "wheat", "role": "cash"},
+        {"crop_id": "vetch_oats", "role": "cover"},
+        {"crop_id": "chickpea", "role": "cash"},
+        {"crop_id": "sunflower", "role": "cash"},
+    ]
+
+    def lines(self, area_ha: float, plan=PLAN, years: int = 3) -> dict[str, float]:
+        return {line.scheme: line.eur_per_ha for line in cap.cap_lines(plan, years, area_ha)}
+
+    def test_every_rate_names_its_intervention_and_year(self):
+        for rate in cap.rates():
+            self.assertTrue(rate.intervention)
+            self.assertEqual(rate.claim_year, 2024)
+            self.assertGreater(rate.eur_per_ha, 0)
+
+    def test_basic_and_redistributive_support(self):
+        small = self.lines(20)
+        self.assertAlmostEqual(small["biss"], 101.90 * 3)
+        self.assertAlmostEqual(small["criss"], 118.53 * 3)
+        self.assertAlmostEqual(self.lines(80)["criss"], 118.53 * 3 * 30 / 80)
+        self.assertNotIn("criss", self.lines(601))
+
+    def test_coupled_support_follows_the_crops(self):
+        self.assertAlmostEqual(self.lines(50)["protein"], 130.28)
+        self.assertNotIn("vegetables", self.lines(50))
+        self.assertAlmostEqual(cap.crop_payment_eur_ha("carrot", 30), 442.74)
+        self.assertAlmostEqual(cap.crop_payment_eur_ha("carrot", 60), (442.74 * 30 + 380.89 * 30) / 60)
+        self.assertEqual(cap.crop_payment_eur_ha("wheat", 60), 0.0)
+
+    def test_eco_schemes_need_covers_and_three_crops(self):
+        self.assertAlmostEqual(self.lines(5)["eco_soil"], 20.00)
+        self.assertAlmostEqual(self.lines(5)["eco_diversity"], 34.56 * 3)
+        two_crops = [{"crop_id": "wheat", "role": "cash"}, {"crop_id": "sunflower", "role": "cash"}]
+        self.assertNotIn("eco_diversity", self.lines(5, two_crops, 2))
+        self.assertNotIn("eco_soil", self.lines(5, two_crops, 2))
+
+    def test_profit_with_cap_adds_the_payments(self):
+        market = Market("BG", 2025, {c: priced(200.0, 4.0) for c in ["wheat", "chickpea", "sunflower"]})
+        plantings = [
+            {**p, "crop_name": p["crop_id"], "start": {"year": i + 1}, "end": {"year": i + 1}}
+            for i, p in enumerate(self.PLAN)
+        ]
+        e = econ.strategy_economics(plantings, 4, market, 20)
+        self.assertAlmostEqual(e.profit_with_cap, e.profit + sum(self.lines(20, years=4).values()))
 
 
 if __name__ == "__main__":

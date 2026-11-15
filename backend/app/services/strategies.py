@@ -27,7 +27,7 @@ from functools import cache
 from itertools import islice, permutations, product
 from typing import Any
 
-from app.services import agronomy, drought
+from app.services import agronomy, cap_payments, drought
 from app.services.strategy_economics import COVER_COSTS_EUR_HA, DEFAULT_COVER_COST_EUR_HA
 
 # strategy crop id -> crop_agronomy.csv id
@@ -481,9 +481,13 @@ def _metrics(rotation: dict[str, Any], territory: dict[str, Any]) -> dict[str, A
         len(preferred.intersection(crop.id for crop in crops)) / len(preferred)
         if preferred else 1.0
     )
+    years = max(item["end"][0] for item in rotation["schedule"])
     profit = (
         sum(_crop_profit(crop, territory) for crop in crops)
-        - sum(_cover_cost(crop.id) for crop in covers)
+        - sum(_cover_cost(crop.id) - territory.get("cover_payment_eur_ha", 0.0) for crop in covers)
+        + years * cap_payments.diversification_eur_ha_year(
+            [crop.id for crop in crops], territory.get("area_ha", 0.0)
+        )
     )
     # VDLUFA humus equivalents add up; a cover crop counts on top of the main crop
     soil_benefit = _humus_score(sum(crop.humus_ceq for crop in planted) / len(crops))
