@@ -6,7 +6,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 from app.config import settings
 from app.db import pool
-from app.routers import climate, crops, drought, fields, health, sentinel, soil, strategies
+from app.routers import climate, crops, drought, fields, health, prices, sentinel, soil, strategies
 from app.timing import setup as setup_logging
 
 setup_logging(settings.log_level)
@@ -38,6 +38,7 @@ app.include_router(drought.router, prefix="/api")
 app.include_router(fields.router, prefix="/api")
 app.include_router(soil.router, prefix="/api")
 app.include_router(strategies.router, prefix="/api")
+app.include_router(prices.router, prefix="/api")
 
 
 @app.get("/")
