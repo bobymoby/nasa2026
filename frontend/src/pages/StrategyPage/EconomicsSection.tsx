@@ -28,14 +28,12 @@ function countryName(code: string): string {
     }
 }
 
-function formatYield(t: number | null): string {
-    return t === null
-        ? "–"
-        : `${t.toLocaleString("en-IE", { maximumFractionDigits: 2 })} t`
+function formatYield(t: number): string {
+    return `${t.toLocaleString("en-IE", { maximumFractionDigits: 2 })} t`
 }
 
-function formatPrice(eurPerT: number | null): string {
-    return eurPerT === null ? "–" : `${formatEur(eurPerT)}/t`
+function formatPrice(eurPerT: number): string {
+    return `${formatEur(eurPerT)}/t`
 }
 
 function formatHa(ha: number): string {
@@ -123,13 +121,6 @@ function EconomicsSection({
 
     return (
         <div className="economics">
-            {!economics.complete && (
-                <p className="economics-warning">
-                    {economics.missingData.join(", ")}: no published {country}{" "}
-                    yield and price, or no cost estimate. Left out of every
-                    total below, which cover the other crops only.
-                </p>
-            )}
             <div className="stat-tiles">
                 <div className="stat-tile hero">
                     <span className="stat-label">
@@ -247,14 +238,11 @@ function EconomicsSection({
 
             <p className="economics-note">
                 Revenue uses {country}'s national five-year average yield and
-                farm-gate price (Eurostat, FAOSTAT where Eurostat has no data)
-                {economics.priceYear
-                    ? `, with prices in ${economics.priceYear} euros`
-                    : ""}
-                . Seed, operating costs and cover-crop figures are estimates.
-                Land rent, subsidies, labour, overheads and tax are not
-                included. Money is
-                counted in the year the crop is harvested.
+                farm-gate price (Eurostat, FAOSTAT where Eurostat has no data),
+                with prices in {economics.priceYear} euros. Seed and operating
+                costs are estimates. Land rent, subsidies, labour, overheads and
+                tax are not included. Money is counted in the year the crop is
+                harvested.
             </p>
         </div>
     )

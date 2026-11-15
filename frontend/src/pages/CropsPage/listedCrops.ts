@@ -1,6 +1,8 @@
 import {
     Crop,
     CropGroup,
+    SoilImpact,
+    SoilScoredCrop,
     SuitabilityClass,
 } from "../../api/fetchCrops"
 
@@ -8,6 +10,7 @@ export type ListedCrop = {
     id: string
     name: string
     gaez: Crop
+    soil: SoilImpact | null
     searchText: string
 }
 
@@ -49,11 +52,25 @@ export function formatYield(crop: Crop): string | null {
     return `up to ${(crop.yieldKgHa / 1000).toFixed(1)} t/ha${basis}`
 }
 
-export function listCrops(crops: Crop[] | null): ListedCrop[] {
-    return (crops ?? []).map((gaez) => ({
-        id: gaez.id,
-        name: gaez.name,
-        gaez,
-        searchText: `${gaez.name} ${GROUP_LABELS[gaez.group]}`.toLowerCase(),
-    }))
+export function listCrops(
+    crops: Crop[] | null,
+    soilScores: SoilScoredCrop[] | null,
+): ListedCrop[] {
+    const soilByCode = new Map<string, SoilImpact>()
+    for (const s of soilScores ?? []) {
+        for (const code of s.gaezCodes) soilByCode.set(code, s.soil)
+    }
+    return (crops ?? []).map((gaez) => {
+        const soil = soilByCode.get(gaez.code) ?? null
+        const searchText = [
+            gaez.name,
+            GROUP_LABELS[gaez.group],
+            soil?.family,
+            soil?.note,
+        ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase()
+        return { id: gaez.id, name: gaez.name, gaez, soil, searchText }
+    })
 }

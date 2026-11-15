@@ -126,6 +126,9 @@ function SoilProfile({
                         {profile.sampling.selected_field_count != null
                             ? `Sampled at ${profile.sampling.sample_count} representative point${profile.sampling.sample_count === 1 ? "" : "s"} chosen from ${profile.sampling.selected_field_count} selected field${profile.sampling.selected_field_count === 1 ? "" : "s"}.`
                             : `Averaged from ${profile.sampling.sample_count} sample point${profile.sampling.sample_count === 1 ? "" : "s"} in the selected rectangle.`}{" "}
+                        {profile.sampling.failed_sample_count
+                            ? `${profile.sampling.failed_sample_count} more point${profile.sampling.failed_sample_count === 1 ? "" : "s"} could not be read from SoilGrids and ${profile.sampling.failed_sample_count === 1 ? "is" : "are"} left out. `
+                            : ""}
                         Values are area context, not crop-specific scores or
                         field measurements.
                     </p>

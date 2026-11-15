@@ -13,6 +13,7 @@ export type SoilSelection = {
     sampling: {
         method: string
         sample_count: number
+        failed_sample_count?: number
         max_sample_count: number
         sampled_points: { lat: number; lng: number }[]
         aggregation: string

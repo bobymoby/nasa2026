@@ -138,7 +138,10 @@ function StrategyDetail({
 
             <section>
                 <h3>Rotation risks</h3>
-                <RotationRisksSection state={risk} plantings={strategy.plantings} />
+                <RotationRisksSection
+                    state={risk}
+                    plantings={strategy.plantings}
+                />
             </section>
 
             <section>
@@ -290,9 +293,10 @@ function ComparisonTable({
 
 function StrategyPage({ selection, crops }: Props) {
     const [strategies, setStrategies] = useState<Strategy[] | null>(null)
-    const [strategySources, setStrategySources] = useState<
-        Pick<StrategiesResult, "dataMode" | "assumptions"> | null
-    >(null)
+    const [strategySources, setStrategySources] = useState<Pick<
+        StrategiesResult,
+        "assumptions"
+    > | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [reloadKey, setReloadKey] = useState(0)
     const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -307,10 +311,7 @@ function StrategyPage({ selection, crops }: Props) {
         fetchStrategies(selection, crops, controller.signal)
             .then((result) => {
                 setStrategies(result.strategies)
-                setStrategySources({
-                    dataMode: result.dataMode,
-                    assumptions: result.assumptions,
-                })
+                setStrategySources({ assumptions: result.assumptions })
                 setSelectedId(result.strategies[0]?.id ?? null)
             })
             .catch((err) => {
@@ -337,7 +338,10 @@ function StrategyPage({ selection, crops }: Props) {
         }
         setRisks(
             Object.fromEntries(
-                strategies.map((s) => [s.id, { status: "loading" } as RiskState]),
+                strategies.map((s) => [
+                    s.id,
+                    { status: "loading" } as RiskState,
+                ]),
             ),
         )
         bySequence.forEach((ids, key) => {
@@ -387,11 +391,7 @@ function StrategyPage({ selection, crops }: Props) {
 
             {strategySources && (
                 <details className="strategy-assumptions">
-                    <summary>
-                        {strategySources.dataMode !== "illustrative_mock"
-                            ? "Data sources and model assumptions"
-                            : "Illustrative model assumptions"}
-                    </summary>
+                    <summary>Data sources and model assumptions</summary>
                     <ul>
                         {strategySources.assumptions.map((assumption) => (
                             <li key={assumption}>{assumption}</li>
@@ -461,7 +461,10 @@ function StrategyPage({ selection, crops }: Props) {
                     </div>
 
                     {selected && (
-                        <StrategyDetail strategy={selected} risk={risks[selected.id]} />
+                        <StrategyDetail
+                            strategy={selected}
+                            risk={risks[selected.id]}
+                        />
                     )}
 
                     <section className="comparison-section">

@@ -1,17 +1,13 @@
 """Estimated cost and profit of a rotation strategy.
 
-Revenue of a harvested crop is the country's reference yield times its
-reference price (`prices.market_reference`: national 5-year means from
-Eurostat, FAOSTAT where Eurostat has none; prices in real euros of the price
-year).
+Revenue of a crop is the country's reference yield times its reference price
+(`prices.market_reference`: national 5-year means from Eurostat, FAOSTAT where
+Eurostat has none; prices in real euros of the price year). Only crops with
+both figures and a cost entry are plannable (`plannable`).
 
-Costs are still hard-coded estimates for Bulgarian conditions, one entry per
-harvested crop and no catch-all default:
-- seed, and other operating costs (fertiliser, crop protection, machinery and fuel)
-- cover crops (seed + sowing and termination; no harvest)
-
-A crop missing its market figures or its cost estimate is left out of the
-totals and marks the strategy incomplete; nothing is filled in by hand.
+Costs are hard-coded estimates for Bulgarian conditions (€/ha per season):
+seed, and other operating costs (fertiliser, crop protection, machinery and
+fuel).
 
 Money is attributed to the harvest year; a forage ley is split per season.
 """
@@ -21,13 +17,6 @@ from dataclasses import dataclass
 
 from app.services.prices.pipeline import CropMarket, Market
 
-NO_MARKET_DATA = "no market data"
-NO_COST_DATA = "no cost estimate"
-
-# strategy crop id -> price table crop id
-MARKET_IDS = {"field_pea": "dry_pea"}
-
-# €/ha per season
 SEED_COSTS_EUR_HA = {
     "wheat": 115.0,
     "barley": 90.0,
@@ -36,48 +25,52 @@ SEED_COSTS_EUR_HA = {
     "maize": 169.0,
     "sorghum": 60.0,
     "buckwheat": 60.0,
+    "foxtail_millet": 25.0,
     "sunflower": 72.0,
     "rapeseed": 60.0,
     "flax": 75.0,
     "soybean": 143.0,
     "chickpea": 132.0,
-    "field_pea": 150.0,
+    "dry_pea": 150.0,
+    "phaseolus_bean": 180.0,
+    "sugarbeet": 250.0,
+    "white_potato": 1800.0,
+    "tobacco": 150.0,
+    "cotton": 120.0,
     "alfalfa": 120.0,
     "carrot": 700.0,
-    "reed_canary_grass": 90.0,
+    "cabbage": 500.0,
+    "onion": 600.0,
+    "tomato": 900.0,
 }
 
-# €/ha per season, excluding seed
 OPERATING_COSTS_EUR_HA = {
     "wheat": 480.0,
     "barley": 430.0,
-    "maize": 550.0,
-    "sunflower": 400.0,
-    "rapeseed": 550.0,
-    "soybean": 320.0,
-    "chickpea": 290.0,
-    "field_pea": 330.0,
-    "oat": 380.0,
     "rye": 380.0,
+    "oat": 380.0,
+    "maize": 550.0,
     "sorghum": 420.0,
     "buckwheat": 330.0,
+    "foxtail_millet": 300.0,
+    "sunflower": 400.0,
+    "rapeseed": 550.0,
     "flax": 380.0,
+    "soybean": 320.0,
+    "chickpea": 290.0,
+    "dry_pea": 330.0,
+    "phaseolus_bean": 450.0,
+    "sugarbeet": 1100.0,
+    "white_potato": 2200.0,
+    "tobacco": 2500.0,
+    "cotton": 600.0,
     "alfalfa": 340.0,
-    "reed_canary_grass": 300.0,
-    # irrigation, hand weeding, harvest and washing
+    # vegetables: irrigation, hand weeding, harvest and grading
     "carrot": 4800.0,
+    "cabbage": 3500.0,
+    "onion": 3000.0,
+    "tomato": 5500.0,
 }
-
-# cover crops: (seed, sowing + termination) in €/ha
-COVER_COSTS_EUR_HA = {
-    "vetch_oats": (70.0, 60.0),
-    "phacelia": (45.0, 50.0),
-    "mustard": (30.0, 50.0),
-    "rye": (60.0, 60.0),
-    "pea_oats": (80.0, 60.0),
-    "clover_radish": (65.0, 60.0),
-}
-DEFAULT_COVER_COST_EUR_HA = (60.0, 60.0)
 
 
 @dataclass(frozen=True)
@@ -88,9 +81,9 @@ class PlantingEconomics:
     revenue: float
     seed_cost: float
     operating_cost: float
-    yield_t_ha: float | None
-    price_eur_t: float | None
-    # where yield and price came from, "no market data" or "no harvest"
+    yield_t_ha: float
+    price_eur_t: float
+    # where yield and price came from
     source: str
     # (rotation year, revenue, cost) slices of this planting
     by_year: list[tuple[int, float, float]]
@@ -99,17 +92,13 @@ class PlantingEconomics:
     def cost(self) -> float:
         return self.seed_cost + self.operating_cost
 
-    @property
-    def counted(self) -> bool:
-        return self.source not in (NO_MARKET_DATA, NO_COST_DATA)
-
 
 @dataclass(frozen=True)
 class StrategyEconomics:
     plantings: list[PlantingEconomics]
     years: int
     country: str
-    price_year: int | None
+    price_year: int
 
     @property
     def revenue(self) -> float:
@@ -131,14 +120,6 @@ class StrategyEconomics:
     def profit(self) -> float:
         return self.revenue - self.total_cost
 
-    @property
-    def missing_data(self) -> list[str]:
-        return list(dict.fromkeys(p.crop_name for p in self.plantings if not p.counted))
-
-    @property
-    def complete(self) -> bool:
-        return not self.missing_data
-
     def by_year(self) -> list[tuple[float, float]]:
         """(revenue, cost) per rotation year."""
         totals = [[0.0, 0.0] for _ in range(self.years)]
@@ -149,8 +130,17 @@ class StrategyEconomics:
         return [(r, c) for r, c in totals]
 
 
-def market_id(crop_id: str) -> str:
-    return MARKET_IDS.get(crop_id, crop_id)
+def plannable(crop_id: str, market: Market) -> bool:
+    m = market.crops.get(crop_id)
+    return (
+        crop_id in SEED_COSTS_EUR_HA
+        and crop_id in OPERATING_COSTS_EUR_HA
+        and m is not None
+        and m.price_eur_t is not None
+        and m.yield_t_ha is not None
+        and m.price_cv is not None
+        and m.yield_cv is not None
+    )
 
 
 def _years(span: tuple[int, int]) -> str:
@@ -164,60 +154,29 @@ def _basis(m: CropMarket) -> str:
     )
 
 
-def _costs(crop_id: str) -> tuple[float, float] | None:
-    if crop_id not in SEED_COSTS_EUR_HA or crop_id not in OPERATING_COSTS_EUR_HA:
-        return None
-    return SEED_COSTS_EUR_HA[crop_id], OPERATING_COSTS_EUR_HA[crop_id]
-
-
-def _season(crop_id: str, market: Market) -> tuple[float | None, float | None, float, str]:
-    """(yield, price, revenue, basis) of one harvest season per ha."""
-    m = market.crops.get(market_id(crop_id))
-    if m is None:
-        return None, None, 0.0, NO_MARKET_DATA
-    if m.price_eur_t is None or m.yield_t_ha is None:
-        return m.yield_t_ha, m.price_eur_t, 0.0, NO_MARKET_DATA
-    return m.yield_t_ha, m.price_eur_t, m.yield_t_ha * m.price_eur_t, _basis(m)
-
-
 def crop_profit_eur_ha(crop_id: str, market: Market) -> float:
-    """Profit of one season of a harvested crop, as the economics below counts it."""
-    costs = _costs(crop_id)
-    _, _, revenue, basis = _season(crop_id, market)
-    if costs is None or basis == NO_MARKET_DATA:
-        return 0.0
-    return revenue - sum(costs)
+    """Profit of one season, as the economics below counts it."""
+    m = market.crops[crop_id]
+    return m.yield_t_ha * m.price_eur_t - SEED_COSTS_EUR_HA[crop_id] - OPERATING_COSTS_EUR_HA[crop_id]
 
 
 def _planting_economics(p: dict, market: Market) -> PlantingEconomics:
     crop_id, role, name = p["crop_id"], p["role"], p["crop_name"]
     start_year, end_year = p["start"]["year"], p["end"]["year"]
-
-    if role == "cover":
-        seed, ops = COVER_COSTS_EUR_HA.get(crop_id, DEFAULT_COVER_COST_EUR_HA)
-        return PlantingEconomics(
-            crop_id, name, role, 0.0, seed, ops, None, None, "no harvest", [(start_year, 0.0, seed + ops)]
-        )
-
-    yield_t_ha, price, revenue, basis = _season(crop_id, market)
-    costs = _costs(crop_id)
-    if costs is None or basis == NO_MARKET_DATA:
-        return PlantingEconomics(
-            crop_id, name, role, 0.0, 0.0, 0.0, yield_t_ha, price,
-            NO_COST_DATA if costs is None else NO_MARKET_DATA, [(end_year, 0.0, 0.0)],
-        )
-    seed, ops = costs
+    m = market.crops[crop_id]
+    revenue = m.yield_t_ha * m.price_eur_t
+    seed, ops = SEED_COSTS_EUR_HA[crop_id], OPERATING_COSTS_EUR_HA[crop_id]
 
     if role == "forage":
         seasons = list(range(start_year, end_year + 1))
         by_year = [(y, revenue, ops + (seed if y == start_year else 0.0)) for y in seasons]
         return PlantingEconomics(
             crop_id, name, role, revenue * len(seasons), seed, ops * len(seasons),
-            yield_t_ha, price, basis, by_year,
+            m.yield_t_ha, m.price_eur_t, _basis(m), by_year,
         )
 
     return PlantingEconomics(
-        crop_id, name, role, revenue, seed, ops, yield_t_ha, price, basis,
+        crop_id, name, role, revenue, seed, ops, m.yield_t_ha, m.price_eur_t, _basis(m),
         [(end_year, revenue, seed + ops)],
     )
 

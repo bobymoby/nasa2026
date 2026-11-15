@@ -106,7 +106,7 @@ def _soilgrids_response(fetch: Callable[[], dict]) -> dict:
     try:
         return fetch()
     except SoilGridsError as exc:
-        status_code = 503 if exc.status_code == 429 else 502
+        status_code = {429: 503, 504: 504}.get(exc.status_code, 502)
         raise HTTPException(status_code, str(exc)) from exc
 
 
