@@ -203,6 +203,55 @@ class StrategiesEndpointTests(unittest.TestCase):
         }
         self.assertEqual(client.post("/api/strategies", json=conflict).status_code, 422)
 
+    def test_planned_rotation_comes_first_and_is_the_baseline(self):
+        response = client.post(
+            "/api/strategies",
+            json={
+                "bounds": BOUNDS,
+                "crops": ["wheat", "sunflower", "chickpea"],
+                "plannedCrops": ["wheat", "sunflower"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        planned = body["strategies"][0]
+        self.assertEqual(planned["strategyType"], "planned")
+        self.assertEqual(planned["name"], "Planned rotation")
+        self.assertEqual(planned["rotation"], ["wheat", "sunflower"])
+        self.assertEqual(planned["ranking"], 1)
+        self.assertEqual(
+            body["baselineRotation"], ["wheat", "sunflower", "wheat", "sunflower"]
+        )
+        self.assertEqual(body["baseline"]["crop_ids"], body["baselineRotation"])
+        self.assertEqual(planned["comparison"]["profit_difference_eur_ha"], 0)
+        self.assertTrue(any("planned rotation" in a for a in body["assumptions"]))
+
+    def test_explicit_baseline_wins_over_planned_crops(self):
+        response = client.post(
+            "/api/strategies",
+            json={
+                "bounds": BOUNDS,
+                "crops": ["wheat", "sunflower", "chickpea"],
+                "plannedCrops": ["wheat", "sunflower"],
+                "baselineRotation": ["barley", "rapeseed", "barley"],
+                "years": 3,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["baselineRotation"][:2], ["barley", "rapeseed"])
+
+    def test_without_planned_crops_the_regional_baseline_is_used(self):
+        response = client.post(
+            "/api/strategies", json={"bounds": BOUNDS, "crops": ["wheat", "barley"]}
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertNotIn("planned", {s["strategyType"] for s in body["strategies"]})
+        self.assertTrue(any("typical regional rotation" in a for a in body["assumptions"]))
+
     def test_accepts_custom_baseline_and_weight_profile(self):
         response = client.post(
             "/api/strategies",
