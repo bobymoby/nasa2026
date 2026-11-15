@@ -83,10 +83,11 @@ def _fetch_open_meteo(points, start: date, end: date) -> list[dict]:
         "timezone": "GMT",
     }
     # long ranges count as many "calls" against Open-Meteo's per-minute limit,
-    # so back-to-back 40-year requests can get a 429: wait for the window to reset
+    # so back-to-back 40-year requests can get a 429: wait for the window to reset.
+    # The hourly and daily limits don't reset within minutes, so those fail at once.
     for wait in (20, 40, 60, None):
         r = httpx.get(OPEN_METEO_URL, params=params, timeout=180)
-        if r.status_code != 429 or wait is None:
+        if r.status_code != 429 or wait is None or "minutely" not in r.text.lower():
             break
         time.sleep(wait)
     if not r.is_success:

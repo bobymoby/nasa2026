@@ -21,7 +21,6 @@ import { AreaSelection, describeSelection } from "../../data/point"
 import CropCard from "./CropCard"
 import ScoreInfo from "./ScoreInfo"
 import { ListedCrop, listCrops } from "./listedCrops"
-import SoilProfile from "./SoilProfile"
 import { useSmoothHorizontalScroll } from "./useSmoothHorizontalScroll"
 
 // smallest height a card fits in; keep in sync with the card styles
@@ -49,6 +48,8 @@ type Props = {
     back?: PageLink
     // emptyLabel lets the user continue without picking anything
     next: PageLink & { emptyLabel?: string }
+    // limits the cards to these crop ids
+    onlyCrops?: string[]
 }
 
 function CropsPage({
@@ -59,6 +60,7 @@ function CropsPage({
     intro,
     back = { to: "/", label: "← Back to map" },
     next,
+    onlyCrops,
 }: Props) {
     const [gaez, setGaez] = useState<CropsResult | null>(null)
     const [gaezError, setGaezError] = useState<string | null>(null)
@@ -114,10 +116,12 @@ function CropsPage({
 
     const all = useMemo(
         () =>
-            listCrops(gaez?.crops ?? null, soil).filter((c) =>
-                plannable?.has(c.id),
+            listCrops(gaez?.crops ?? null, soil).filter(
+                (c) =>
+                    plannable?.has(c.id) &&
+                    (!onlyCrops || onlyCrops.includes(c.id)),
             ),
-        [gaez, soil, plannable],
+        [gaez, soil, plannable, onlyCrops],
     )
 
     // Drop picked crops not offered for this area after suitability loads.
@@ -273,11 +277,6 @@ function CropsPage({
                 </span>
             </div>
 
-            <SoilProfile
-                selection={selection}
-                reloadKey={reloadKey}
-                onRetry={() => setReloadKey((key) => key + 1)}
-            />
             {!ready && !gaezError && (
                 <p className="crops-loading">
                     Checking which crops suit this area… a new area takes up to

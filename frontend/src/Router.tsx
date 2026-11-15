@@ -9,7 +9,7 @@ import StrategyPage from "./pages/StrategyPage/StrategyPage"
 export default function AppRouter() {
     const [bounds, setBounds] = useState<Bounds | null>(null)
     const [selectedCrops, setSelectedCrops] = useState<string[]>([])
-    const [currentCrops, setCurrentCrops] = useState<string[]>([])
+    const [plannedCrops, setPlannedCrops] = useState<string[]>([])
     const [selectedFields, setSelectedFields] = useState<Field[]>([])
 
     // the crops page gets one or the other, so drawing a rectangle drops the
@@ -23,7 +23,7 @@ export default function AppRouter() {
         if (next.length > 0) setBounds(null)
     }, [])
 
-    // memoised so the crops page doesn't refetch on unrelated re-renders
+    // memoised so the map and crops page don't refetch on unrelated re-renders
     const selection = useMemo<AreaSelection | null>(() => {
         if (selectedFields.length > 0) {
             return {
@@ -54,6 +54,7 @@ export default function AppRouter() {
                         onBoundsChange={changeBounds}
                         selectedFields={selectedFields}
                         onSelectedFieldsChange={changeSelectedFields}
+                        selection={selection}
                     />
                 }
             />
@@ -67,7 +68,7 @@ export default function AppRouter() {
                             selectedCrops={selectedCrops}
                             onSelectedCropsChange={setSelectedCrops}
                             next={{
-                                to: "/current",
+                                to: "/planned",
                                 label: "Build strategies →",
                             }}
                         />
@@ -77,7 +78,7 @@ export default function AppRouter() {
                 }
             />
             <Route
-                path="/current"
+                path="/planned"
                 element={
                     !selection ? (
                         <Navigate to="/" replace />
@@ -85,12 +86,13 @@ export default function AppRouter() {
                         <Navigate to="/crops" replace />
                     ) : (
                         <CropsPage
-                            key="current"
+                            key="planned"
                             selection={selection}
-                            selectedCrops={currentCrops}
-                            onSelectedCropsChange={setCurrentCrops}
-                            title="Your current rotation"
-                            intro="Pick the crops you grow now, in the order you plant them. Your current rotation is shown first, so you can compare it with the new strategies."
+                            selectedCrops={plannedCrops}
+                            onSelectedCropsChange={setPlannedCrops}
+                            onlyCrops={selectedCrops}
+                            title="Planned rotation"
+                            intro="From the crops you just picked, choose the ones you plan to grow, in the order you will plant them. Your planned rotation is shown first and is the baseline the other strategies are compared with."
                             back={{ to: "/crops", label: "← Back to crops" }}
                             next={{
                                 to: "/strategy",
@@ -112,7 +114,7 @@ export default function AppRouter() {
                         <StrategyPage
                             selection={selection}
                             crops={selectedCrops}
-                            currentCrops={currentCrops}
+                            plannedCrops={plannedCrops}
                         />
                     )
                 }

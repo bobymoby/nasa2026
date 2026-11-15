@@ -26,7 +26,7 @@ import {
 type Props = {
     selection: AreaSelection
     crops: string[]
-    currentCrops: string[]
+    plannedCrops: string[]
 }
 
 const RATINGS: { key: keyof Strategy["ratings"]; label: string }[] = [
@@ -297,7 +297,7 @@ function ComparisonTable({
     )
 }
 
-function StrategyPage({ selection, crops, currentCrops }: Props) {
+function StrategyPage({ selection, crops, plannedCrops }: Props) {
     const [strategies, setStrategies] = useState<Strategy[] | null>(null)
     const [strategySources, setStrategySources] = useState<Pick<
         StrategiesResult,
@@ -314,7 +314,7 @@ function StrategyPage({ selection, crops, currentCrops }: Props) {
         setStrategySources(null)
         setError(null)
 
-        fetchStrategies(selection, crops, currentCrops, controller.signal)
+        fetchStrategies(selection, crops, plannedCrops, controller.signal)
             .then((result) => {
                 setStrategies(result.strategies)
                 setStrategySources({ assumptions: result.assumptions })
@@ -330,7 +330,7 @@ function StrategyPage({ selection, crops, currentCrops }: Props) {
             })
 
         return () => controller.abort()
-    }, [selection, crops, currentCrops, reloadKey])
+    }, [selection, crops, plannedCrops, reloadKey])
 
     // check every strategy's planting order once; strategies with the same
     // order share one request
@@ -380,8 +380,8 @@ function StrategyPage({ selection, crops, currentCrops }: Props) {
 
     return (
         <div className="strategy-page">
-            <Link to="/current" className="strategy-back">
-                ← Back to current rotation
+            <Link to="/planned" className="strategy-back">
+                ← Back to planned rotation
             </Link>
             <h1 className="strategy-title">Rotation strategies</h1>
             <p className="strategy-lead">
@@ -436,14 +436,14 @@ function StrategyPage({ selection, crops, currentCrops }: Props) {
                                 type="button"
                                 role="tab"
                                 aria-selected={s.id === selectedId}
-                                className={`strategy-option${s.id === selectedId ? " selected" : ""}${s.strategyType === "current" ? " current" : ""}`}
+                                className={`strategy-option${s.id === selectedId ? " selected" : ""}${s.strategyType === "planned" ? " planned" : ""}`}
                                 onClick={() => setSelectedId(s.id)}
                             >
                                 <span className="option-name">
                                     {s.name}
-                                    {s.strategyType === "current" && (
-                                        <span className="option-current">
-                                            Now
+                                    {s.strategyType === "planned" && (
+                                        <span className="option-planned">
+                                            Baseline
                                         </span>
                                     )}
                                 </span>
@@ -461,7 +461,7 @@ function StrategyPage({ selection, crops, currentCrops }: Props) {
                                 <span
                                     className={`option-match${s.matchedCrops.length ? "" : " none"}`}
                                 >
-                                    {s.strategyType !== "current" && (
+                                    {s.strategyType !== "planned" && (
                                         <>
                                             {s.matchedCrops.length
                                                 ? `Uses ${s.matchedCrops.map(humanize).join(", ")}`

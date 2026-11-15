@@ -75,7 +75,35 @@ def crop_revenue_eur_ha(crop_id: str, market: Market) -> float:
     return m.yield_t_ha * m.price_eur_t
 
 
+<<<<<<< HEAD
 def _planting_revenue(p: dict, market: Market) -> PlantingRevenue:
+=======
+def _season(crop_id: str, market: Market) -> tuple[float | None, float | None, float, str]:
+    """(yield, price, revenue, basis) of one harvest season per ha."""
+    m = market.crops.get(market_id(crop_id))
+    if m is None:
+        return None, None, 0.0, NO_MARKET_DATA
+    if m.price_eur_t is None or m.yield_t_ha is None:
+        return m.yield_t_ha, m.price_eur_t, 0.0, NO_MARKET_DATA
+    return m.yield_t_ha, m.price_eur_t, m.yield_t_ha * m.price_eur_t, _basis(m)
+
+
+def plannable(crop_id: str, market: Market) -> bool:
+    """A harvested crop whose revenue and costs can both be counted."""
+    return _costs(crop_id) is not None and _season(crop_id, market)[3] != NO_MARKET_DATA
+
+
+def crop_profit_eur_ha(crop_id: str, market: Market) -> float:
+    """Profit of one season of a harvested crop, as the economics below counts it."""
+    costs = _costs(crop_id)
+    _, _, revenue, basis = _season(crop_id, market)
+    if costs is None or basis == NO_MARKET_DATA:
+        return 0.0
+    return revenue - sum(costs)
+
+
+def _planting_economics(p: dict, market: Market) -> PlantingEconomics:
+>>>>>>> 686549bf26d1e76f75b702537984176bd6dfbac6
     crop_id, role, name = p["crop_id"], p["role"], p["crop_name"]
     start_year, end_year = p["start"]["year"], p["end"]["year"]
     m = market.crops[crop_id]
