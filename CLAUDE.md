@@ -55,7 +55,7 @@ DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose up -d db
 - **Upstream sources:**
   - Sentinel Hub / Copernicus: `services/sentinel_hub.py`. A semaphore allows at most 10 requests in flight.
   - ERA5 via Open-Meteo, and NASA POWER: `services/weather.py`.
-  - ISRIC SoilGrids: `routers/soil.py`, `services/soilgrids.py`.
+  - ISRIC SoilGrids: `services/soilgrids.py` (REST, soil properties) and `services/wrb.py` (WRB soil groups for `/soil/point`, read from the rasters on files.isric.org instead of the rate-limited REST API).
   - FAO GAEZ v4 ImageServer: `services/gaez.py`.
   - FAO ECOCROP: `app/data/ecocrop.csv`, used by `services/crop_suitability.py`.
   - Crop selling prices: `services/prices/` (`sources.py` fetch/parse, `store.py` tables, `pipeline.py` merge, deflate, summarize). Eurostat `apri_ap_crpouta` first, FAOSTAT bulk file as fallback. Crop codes are in `app/data/crop_price_codes.csv`, keyed by the same crop ids as the crops page (`wheat`, `dry_pea`, …); adding a country needs no code change.
@@ -64,6 +64,7 @@ DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose up -d db
   - `services/ndvi_cache.py` stores per-year NDVI observations in `ndvi_year_cache`, keyed by field id or outline hash plus the inward buffer. Finished years are kept forever; the current year expires after 1 day. Concurrent fetches of the same plot and year are deduplicated.
   - `services/gaez.py` reads FAO's GeoTIFFs with rasterio and stores 1° tiles (`gaez_tile`, `gaez_tile_fetch`, `gaez_tile_value`, plus `gaez_crop`, `gaez_layer`). A missing tile loads its whole 10° region. Nothing is cached per plot.
   - `services/site_context.py` stores static per-plot inputs (topsoil, available water, RUSLE K, slope) in `plot_site`, keyed like the NDVI cache; everything else in the context is derived from the caches above. Country comes from `services/country.py` (bundled Natural Earth borders).
+  - `services/wrb.py` stores the top 3 WRB groups per cell in 256-cell tiles (`soilgrids_wrb_tile`). Bulgaria is preloaded; a missing tile is read from ISRIC on first use. `/soil/legend` counts the map legend from these tiles, clipped to Bulgaria; only the soil map layer itself still comes from the ISRIC WMS.
   - Tables are created lazily with `ensure_table` in `app/db.py`.
   - Every cache must degrade gracefully: if the database is down, the request still succeeds, uncached.
 - **Field parcels.** Field outlines come from the PostGIS table `bulgaria_data` (EPSG:3035). The map loads them as vector tiles (`/fields/tiles/...`) and fetches one full field on click.
